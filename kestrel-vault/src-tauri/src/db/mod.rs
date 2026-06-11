@@ -22,8 +22,11 @@
 
 pub mod audit_event_repo;
 pub mod connection;
+pub mod file_entry_repo;
+pub mod folder_repo;
 pub mod migrations;
 pub mod repository;
+pub mod secure_note_repo;
 pub mod vault_entry_repo;
 pub mod vault_meta_repo;
 
@@ -31,5 +34,8 @@ pub mod vault_meta_repo;
 pub use connection::DbConnection;
 pub use repository::Repository;
 pub use audit_event_repo::{AuditEventRepo, AuditEventRow, CreateAuditEventRequest};
+pub use file_entry_repo::{FileEntryRepo, FileEntryRow, CreateFileEntryRequest};
+pub use folder_repo::{FolderRepo, FolderRow, CreateFolderRequest as CreateFolderRepoRequest};
+pub use secure_note_repo::{SecureNoteRepo, SecureNoteRow, CreateSecureNoteRequest};
 pub use vault_entry_repo::VaultEntryRepo;
 pub use vault_meta_repo::{VaultMeta, VaultMetaRepo};

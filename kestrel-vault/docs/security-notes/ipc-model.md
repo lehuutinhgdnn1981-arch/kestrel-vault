@@ -133,12 +133,13 @@
 
 ## Command Inventory
 
-### Auth Commands (6)
+### Auth Commands (7)
 - `auth_initialize_vault` — First-time setup
 - `auth_unlock` — Unlock with master password
 - `auth_lock` — Lock vault immediately
 - `auth_get_session` — Get current session state
 - `auth_is_vault_initialized` — Check if vault exists
+- `auth_get_vault_status` — Get vault state + lockout info
 - `auth_change_password` — Change master password
 
 ### Vault Commands (7)

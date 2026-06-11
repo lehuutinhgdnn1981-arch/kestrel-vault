@@ -30,7 +30,10 @@ pub mod vault_commands;
 
 // Re-export command types for convenience
 pub use types::{
-    AppSettingsResponse, AuditEventResponse, AuditPageResponse, CommandError,
-    CommandResult, PasswordRevealResponse, PasswordStrengthResponse,
-    VaultEntryResponse, VulnerabilityItemResponse,
+    AppSettingsResponse, AuditEventResponse, AuditPageResponse, ChangePasswordRequest,
+    CommandError, CommandResult, CreateFolderRequest, FileEntryResponse, FolderResponse,
+    InitializeVaultRequest, PasswordRevealResponse, PasswordStrengthResponse,
+    SecureNoteRevealResponse, SecureNoteResponse, SecurityBreakdown, SecurityScoreResponse,
+    UnlockVaultRequest, VaultEntryResponse, VaultInitResponse, VaultLockResponse,
+    VaultStatusResponse, VulnerabilityItemResponse,
 };

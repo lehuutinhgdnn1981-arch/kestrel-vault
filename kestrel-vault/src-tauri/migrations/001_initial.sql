@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS vault_meta (
     iterations      INTEGER NOT NULL DEFAULT 3,           -- Argon2id time cost (OWASP: 3)
     memory_cost     INTEGER NOT NULL DEFAULT 262144,      -- Argon2id memory in KiB (OWASP: 256 MB)
     parallelism     INTEGER NOT NULL DEFAULT 4,           -- Argon2id parallelism (OWASP: 4)
+    test_envelope   BLOB,                                 -- Encrypted test envelope for password verification
+    hint            TEXT,                                 -- Optional password hint (NOT secure)
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),  -- ISO8601 UTC
     updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))   -- ISO8601 UTC
 );

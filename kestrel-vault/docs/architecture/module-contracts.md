@@ -49,6 +49,16 @@ config (standalone — no internal deps)
 | `random_nonce` | `() → Nonce` | Generate random nonce |
 | `random_uuid` | `() → Uuid` | Generate random UUID |
 
+### Envelope Format
+```
+[version:1][nonce:12][ciphertext:N][tag:16]
+```
+- `version`: 1 byte (0x01 for V1)
+- `nonce`: 12 bytes (96-bit, randomly generated per encryption)
+- `ciphertext`: N bytes (same length as plaintext)
+- `tag`: 16 bytes (128-bit GCM authentication tag)
+- AAD context: `entity_id:field_name` (bound to encryption, prevents cross-field swap)
+
 ### Private (not exported)
 - Argon2 parameter internals
 - AES-GCM cipher construction
@@ -67,14 +77,25 @@ config (standalone — no internal deps)
 | `VaultEntryRepo` | Vault entry repository |
 | `AuditEventRepo` | Audit event repository (append-only) |
 | `VaultMetaRepo` | Vault metadata repository (singleton) |
+| `FolderRepo` | Folder repository (hierarchical organization) |
+| `SecureNoteRepo` | Secure note repository (encrypted notes) |
+| `FileEntryRepo` | File entry repository (encrypted file vault) |
 | `AuditEventRow` | Audit event database row |
 | `CreateAuditEventRequest` | Request to create audit event |
 | `VaultMeta` | Vault metadata (KDF params, test envelope) |
+| `FolderRow` | Folder database row |
+| `CreateFolderRequest` | Request to create folder |
+| `SecureNoteRow` | Secure note database row |
+| `CreateSecureNoteRequest` | Request to create secure note |
+| `FileEntryRow` | File entry database row |
+| `CreateFileEntryRequest` | Request to create file entry |
 
 ### Public Functions
 | Function | Description |
 |----------|-------------|
 | `transaction(pool, f)` | Execute within a database transaction |
+| `FolderRepo::would_create_cycle(pool, id, parent)` | Check for circular folder references |
+| `FolderRepo::count_entries(pool, folder_id)` | Count entries in a folder |
 
 ### Private
 - All SQL query strings
@@ -93,6 +114,7 @@ config (standalone — no internal deps)
 | `UpdateEntryRequest` | Request to update entry (partial) |
 | `Folder` | Organizational folder |
 | `FolderTree` | Nested folder hierarchy |
+| `VaultService` | Trait for vault operations |
 
 ### Access Pattern
 - Vault module types are accessed through `commands::vault_commands`
@@ -141,18 +163,40 @@ config (standalone — no internal deps)
 | `SessionState` | Locked or Unlocked |
 | `VaultState` | Uninitialized, Locked, Unlocked |
 | `VaultStateMachine` | Lifecycle state machine |
-| `VaultTransition` | Initialize, Unlock, Lock, AutoLock, ChangePassword |
-| `TransitionResult` | Success or Rejected |
-| `VaultStateEvent` | State change event for observers |
+| `VaultTransition` | Initialize, Unlock, Lock, AutoLock, Destroy |
+| `TransitionResult` | from_state, to_state, transition, timestamp |
+| `VaultStateEvent` | State change event for audit logging |
+| `VaultContext` | Context for guard evaluation |
 | `RateLimiter` | Per-operation rate limiting |
 | `Operation` | Login, Command, FileOperation |
 | `LockoutState` | Allowed, Delayed(seconds), LockedOut |
 | `FailedAttemptTracker` | Progressive lockout tracking |
 
+### Vault Lifecycle State Machine
+```
+                    ┌──────────────┐
+                    │ Uninitialized │
+                    └──────┬───────┘
+                           │ Initialize
+                           ▼
+                    ┌──────────────┐
+            ┌──────│    Locked     │──────┐
+            │      └──────┬───────┘      │
+            │             │ Unlock       │ Lock / Auto-lock
+            │             ▼              │
+            │      ┌──────────────┐      │
+            │      │   Unlocked   │──────┘
+            │      └──────┬───────┘
+            │             │
+            │  Lock /     │ Destroy
+            │  Auto-lock  │
+            └─────────────┘
+```
+
 ### Access Pattern
-- `VaultStateMachine` used by `commands::auth_commands`
-- `RateLimiter` used by command middleware
-- `FailedAttemptTracker` used by auth flow
+- `VaultStateMachine` used by `commands::auth_commands` via `AppState`
+- `RateLimiter` used by `AppState` for command middleware
+- `FailedAttemptTracker` used by `AppState` for auth flow
 
 ---
 
@@ -183,11 +227,40 @@ config (standalone — no internal deps)
 | `VaultEntryResponse` | Entry metadata (NO password) |
 | `PasswordRevealResponse` | Temporary password reveal |
 | `SessionResponse` | Session metadata |
+| `VaultStatusResponse` | Vault state + lockout info |
+| `VaultInitResponse` | Vault initialization result |
+| `VaultLockResponse` | Lock/unlock operation result |
+| `InitializeVaultRequest` | Vault init request (typed) |
+| `UnlockVaultRequest` | Vault unlock request (typed) |
+| `ChangePasswordRequest` | Password change request (typed) |
 | `PasswordStrengthResponse` | Strength analysis result |
 | `VulnerabilityItemResponse` | Vulnerability finding |
 | `AuditEventResponse` | Audit event for frontend |
 | `AuditPageResponse` | Paginated audit results |
 | `AppSettingsResponse` | Application settings |
+| `FolderResponse` | Folder metadata |
+| `CreateFolderRequest` | Folder creation request |
+| `SecureNoteResponse` | Note metadata (no content) |
+| `SecureNoteRevealResponse` | Note content (temporary) |
+| `FileEntryResponse` | File entry metadata |
+| `SecurityScoreResponse` | Overall security score |
+| `SecurityBreakdown` | Score breakdown by category |
+
+### AppState (Shared Tauri State)
+| Field | Type | Description |
+|-------|------|-------------|
+| `vault_state_machine` | `RwLock<VaultStateMachine>` | Vault lifecycle FSM |
+| `rate_limiter` | `RwLock<RateLimiter>` | Per-operation rate limiting |
+| `lockout_tracker` | `RwLock<FailedAttemptTracker>` | Progressive lockout |
+| `master_key_present` | `RwLock<bool>` | Whether key is in memory |
+
+### State Guard Methods (AppState)
+| Method | Description |
+|--------|-------------|
+| `require_state(required)` | Enforce specific vault state |
+| `require_unlocked()` | Shorthand for `require_state(Unlocked)` |
+| `require_initialized()` | Enforce vault exists (Locked or Unlocked) |
+| `check_lockout()` | Check progressive lockout state |
 
 ### Validation Constants
 | Constant | Value |
@@ -202,5 +275,5 @@ config (standalone — no internal deps)
 | `MAX_HINT_LEN` | 100 |
 | `MAX_QUERY_LEN` | 256 |
 
-### Command List (22 total)
+### Command List (23 total)
 See `docs/security-notes/ipc-model.md` for complete inventory.

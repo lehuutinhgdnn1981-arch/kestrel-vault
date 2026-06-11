@@ -10,6 +10,18 @@
 //! - Passwords are ONLY returned via `vault_reveal_password`
 //! - All modifications are audit-logged
 //! - All inputs are validated
+//!
+//! # IPC Contract
+//!
+//! | Command                | Required State | Effect            |
+//! |------------------------|---------------|-------------------|
+//! | vault_create_entry     | Unlocked      | Create + encrypt  |
+//! | vault_get_entry        | Unlocked      | Read (no pwd)     |
+//! | vault_update_entry     | Unlocked      | Update + encrypt  |
+//! | vault_delete_entry     | Unlocked      | Delete            |
+//! | vault_list_entries     | Unlocked      | List (no pwds)    |
+//! | vault_search_entries   | Unlocked      | Search (no pwds)  |
+//! | vault_reveal_password  | Unlocked      | Decrypt + audit   |
 
 use crate::commands::types::{
     validate_field, validate_uuid, CommandError, CommandResult,
@@ -25,6 +37,11 @@ use super::auth_commands::AppState;
 /// The plaintext password is encrypted in Rust before storage.
 /// The response does NOT include the password.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Creates encrypted entry in database
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -38,10 +55,10 @@ pub fn vault_create_entry(
     notes: Option<String>,
     folder_id: Option<String>,
     tags: Vec<String>,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<VaultEntryResponse> {
-    // Validate vault is unlocked
-    // TODO: Check AppState.vault_state
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
 
     // Validate inputs
     validate_field(&title, MAX_TITLE_LEN, "Title")?;
@@ -67,10 +84,13 @@ pub fn vault_create_entry(
         validate_field(tag, 64, "Tag")?;
     }
 
-    // TODO: Encrypt password using seal_envelope
-    // TODO: Encrypt notes using seal_envelope
+    // TODO: Encrypt password using seal_envelope with AAD context
+    //       entity_id = entry_id, field_name = "password"
+    // TODO: Encrypt notes using seal_envelope with AAD context
+    //       entity_id = entry_id, field_name = "notes"
     // TODO: Insert into database via VaultEntryRepo
-    // TODO: Audit log: EntryCreated
+    // TODO: Audit log: EntryCreated { entry_id }
+    // TODO: Zeroize plaintext password from memory
 
     // Placeholder response
     CommandResult::ok(VaultEntryResponse {
@@ -93,6 +113,11 @@ pub fn vault_create_entry(
 /// Returns entry metadata — the password is NOT included.
 /// Use `vault_reveal_password` to access the password.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Read-only
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -100,11 +125,13 @@ pub fn vault_create_entry(
 #[tauri::command]
 pub fn vault_get_entry(
     id: String,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<VaultEntryResponse> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     validate_uuid(&id, "id")?;
 
-    // TODO: Check vault is unlocked
     // TODO: Load from database via VaultEntryRepo
     // TODO: Map to VaultEntryResponse (no password)
 
@@ -116,6 +143,11 @@ pub fn vault_get_entry(
 /// Only provided fields are updated. If a new password is
 /// provided, it is encrypted before storage.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Re-encrypt changed fields, update database
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -130,8 +162,11 @@ pub fn vault_update_entry(
     notes: Option<String>,
     folder_id: Option<String>,
     tags: Option<Vec<String>>,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<VaultEntryResponse> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     validate_uuid(&id, "id")?;
     if let Some(ref t) = title {
         validate_field(t, MAX_TITLE_LEN, "Title")?;
@@ -153,10 +188,11 @@ pub fn vault_update_entry(
         validate_field(n, MAX_NOTES_LEN, "Notes")?;
     }
 
-    // TODO: Check vault is unlocked
-    // TODO: Re-encrypt changed sensitive fields
+    // TODO: Load existing entry from database
+    // TODO: Re-encrypt changed sensitive fields using seal_envelope
     // TODO: Update in database
-    // TODO: Audit log: EntryUpdated
+    // TODO: Audit log: EntryUpdated { entry_id, changed_fields }
+    // TODO: Zeroize any plaintext passwords
 
     CommandResult::Err(CommandError::validation("Not yet implemented"))
 }
@@ -165,6 +201,11 @@ pub fn vault_update_entry(
 ///
 /// Requires confirmation to prevent accidental deletion.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Permanent deletion
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -173,8 +214,11 @@ pub fn vault_update_entry(
 pub fn vault_delete_entry(
     id: String,
     confirm: bool,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<()> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     validate_uuid(&id, "id")?;
     if !confirm {
         return CommandResult::Err(CommandError::validation(
@@ -182,9 +226,8 @@ pub fn vault_delete_entry(
         ));
     }
 
-    // TODO: Check vault is unlocked
-    // TODO: Delete from database
-    // TODO: Audit log: EntryDeleted
+    // TODO: Delete from database via VaultEntryRepo
+    // TODO: Audit log: EntryDeleted { entry_id }
 
     CommandResult::ok(())
 }
@@ -193,6 +236,11 @@ pub fn vault_delete_entry(
 ///
 /// Returns entry metadata only — no passwords.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Read-only
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -201,16 +249,18 @@ pub fn vault_list_entries(
     folder_id: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<Vec<VaultEntryResponse>> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     if let Some(ref fid) = folder_id {
         validate_uuid(fid, "folder_id")?;
     }
     let limit = limit.unwrap_or(50).min(200);
     let offset = offset.unwrap_or(0).max(0);
 
-    // TODO: Check vault is unlocked
-    // TODO: Load entries from database
+    // TODO: Load entries from database via VaultEntryRepo
     // TODO: Map to VaultEntryResponse (no passwords)
 
     CommandResult::ok(Vec::new())
@@ -220,6 +270,11 @@ pub fn vault_list_entries(
 ///
 /// Search operates on plaintext metadata only (not encrypted fields).
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Read-only
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
@@ -228,13 +283,15 @@ pub fn vault_list_entries(
 pub fn vault_search_entries(
     query: String,
     limit: Option<i64>,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<Vec<VaultEntryResponse>> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     validate_field(&query, 256, "Query")?;
     let limit = limit.unwrap_or(50).min(200);
 
-    // TODO: Check vault is unlocked
-    // TODO: Search database by title/username
+    // TODO: Search database by title/username via VaultEntryRepo
 
     CommandResult::ok(Vec::new())
 }
@@ -244,26 +301,35 @@ pub fn vault_search_entries(
 /// This is the ONLY command that returns a decrypted password.
 /// The frontend should auto-clear the password after a timeout.
 ///
+/// # IPC Contract
+//!
+//! - **Required state**: Unlocked
+//! - **Effect**: Decrypt + audit log
+//!
 /// # Security
 //!
 //! - Audit-logged (who revealed what and when)
 //! - Auto-clear metadata included in response
 //! - Should only be called on explicit user action
-///
+//!
 /// # Errors
 //!
 //! - `UNAUTHORIZED`: Vault is locked
 #[tauri::command]
 pub fn vault_reveal_password(
     id: String,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> CommandResult<PasswordRevealResponse> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+
     validate_uuid(&id, "id")?;
 
-    // TODO: Check vault is unlocked
-    // TODO: Load encrypted password from database
-    // TODO: Decrypt using open_envelope
+    // TODO: Load encrypted password from database via VaultEntryRepo
+    // TODO: Decrypt using open_envelope with AAD context
+    //       entity_id = entry_id, field_name = "password"
     // TODO: Audit log: PasswordRevealed { entry_id }
+    // TODO: Set auto_clear_seconds from config
 
     CommandResult::Err(CommandError::validation("Not yet implemented"))
 }

@@ -43,6 +43,9 @@ pub fn audit_query_events(
     let limit = limit.unwrap_or(50).min(200);
     let offset = offset.unwrap_or(0).max(0);
 
+    // Audit queries are available in any state (security visibility)
+    // No state guard required — audit logs don't contain secrets
+
     // TODO: Query audit_event_repo with filters
     // TODO: Map to AuditEventResponse
 

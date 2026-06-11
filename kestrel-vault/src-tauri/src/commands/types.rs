@@ -9,8 +9,18 @@
 //! - All input is validated before processing
 //! - Errors are sanitized before sending to frontend
 //! - The `CommandResult` wrapper ensures consistent error handling
+//!
+//! # IPC Type Contracts
+//!
+//! Every Tauri command follows this contract:
+//! 1. Request: Flat parameters (no nested JSON objects) for Tauri IPC
+//! 2. Validation: All inputs validated before processing
+//! 3. Authorization: Vault state checked (Locked/Unlocked)
+//! 4. Processing: Business logic in domain modules
+//! 5. Response: Typed struct with no secrets
 
 use crate::error::KestrelError;
+use crate::security::vault_state::VaultState;
 use serde::{Deserialize, Serialize};
 
 // ─── Validation Constants ─────────────────────────────────────────
@@ -223,6 +233,159 @@ pub struct AppSettingsResponse {
     pub theme: String,
     pub language: String,
     pub clear_clipboard_seconds: u32,
+}
+
+// ─── Vault State Responses ────────────────────────────────────────
+
+/// Response for vault status queries.
+/// Contains NO secrets — only lifecycle state metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultStatusResponse {
+    /// Current lifecycle state of the vault.
+    pub state: String,
+    /// Whether the vault has been initialized.
+    pub is_initialized: bool,
+    /// Whether the vault is currently unlocked.
+    pub is_unlocked: bool,
+    /// Number of failed unlock attempts in current locked period.
+    pub failed_unlock_attempts: u32,
+    /// Whether the user is currently locked out.
+    pub is_locked_out: bool,
+}
+
+impl VaultStatusResponse {
+    /// Creates a VaultStatusResponse from the current vault state.
+    pub fn from_state(state: VaultState, failed_attempts: u32, is_locked_out: bool) -> Self {
+        Self {
+            state: state.to_string(),
+            is_initialized: state != VaultState::Uninitialized,
+            is_unlocked: state == VaultState::Unlocked,
+            failed_unlock_attempts: failed_attempts,
+            is_locked_out,
+        }
+    }
+}
+
+/// Response for vault initialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultInitResponse {
+    /// Confirmation that the vault was initialized.
+    pub initialized: bool,
+    /// The vault is now in Locked state.
+    pub state: String,
+}
+
+/// Response for vault lock/unlock operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultLockResponse {
+    /// The new vault state after the operation.
+    pub state: String,
+}
+
+// ─── Auth Request Types ──────────────────────────────────────────
+
+/// Request to initialize the vault for the first time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitializeVaultRequest {
+    /// The master password (min 8 characters).
+    pub master_password: String,
+    /// Optional password hint (NOT a security feature).
+    pub hint: Option<String>,
+}
+
+/// Request to unlock the vault.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnlockVaultRequest {
+    /// The master password.
+    pub master_password: String,
+}
+
+/// Request to change the master password.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+    /// The current master password (must be verified).
+    pub current_password: String,
+    /// The new master password (min 8 characters).
+    pub new_password: String,
+}
+
+// ─── Folder Types ────────────────────────────────────────────────
+
+/// Response for folder queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderResponse {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub entry_count: i64,
+    pub created_at: String,
+}
+
+/// Request to create a folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateFolderRequest {
+    pub name: String,
+    pub parent_id: Option<String>,
+}
+
+// ─── Secure Note Types ───────────────────────────────────────────
+
+/// Response for secure note queries — encrypted content NOT included.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecureNoteResponse {
+    pub id: String,
+    pub title: String,
+    pub has_content: bool,
+    pub folder_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Response for secure note reveal — content included temporarily.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecureNoteRevealResponse {
+    pub id: String,
+    pub title: String,
+    /// Decrypted note content — auto-cleared after display.
+    pub content: String,
+    /// Seconds until the frontend should auto-clear.
+    pub auto_clear_seconds: u32,
+}
+
+// ─── File Entry Types ────────────────────────────────────────────
+
+/// Response for file vault entries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntryResponse {
+    pub id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub folder_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+// ─── Security Center Types ───────────────────────────────────────
+
+/// Overall security score response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityScoreResponse {
+    /// Score from 0-100.
+    pub score: u8,
+    /// Human-readable label.
+    pub label: String,
+    /// Breakdown by category.
+    pub breakdown: SecurityBreakdown,
+}
+
+/// Breakdown of security score by category.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityBreakdown {
+    pub password_health: u8,
+    pub breach_status: u8,
+    pub vault_hygiene: u8,
+    pub audit_compliance: u8,
 }
 
 // ─── Validation Helpers ───────────────────────────────────────────
