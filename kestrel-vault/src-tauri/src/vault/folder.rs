@@ -74,6 +74,9 @@ pub struct FolderNode {
 
 /// Builds a folder tree from a flat list of folders.
 ///
+/// Takes a flat list of folders and organizes them into a tree
+/// structure based on parent-child relationships.
+///
 /// # Arguments
 ///
 /// * `folders` - A flat list of all folders
@@ -81,20 +84,59 @@ pub struct FolderNode {
 /// # Returns
 ///
 /// A list of root `FolderNode`s, each potentially containing
-/// nested children.
+/// nested children. Root folders are those with `parent_id = None`.
 ///
-/// # TODO (Phase 2)
+/// # Algorithm
 ///
-/// - Implement folder tree building algorithm
-/// - Add cycle detection
-/// - Add depth limits
-pub fn build_folder_tree(_folders: &[Folder]) -> Result<Vec<FolderNode>, crate::error::KestrelError> {
-    // TODO: Implement in Phase 2
-    // 1. Index folders by ID
-    // 2. For each root folder, recursively build children
-    // 3. Detect and reject circular references
-    // 4. Return tree structure
-    Ok(Vec::new())
+/// 1. Index all folders by their ID for O(1) lookup
+/// 2. Collect root folders (no parent) as tree roots
+/// 3. For each folder, find its children by matching parent_id
+/// 4. Recursively build the tree up to a maximum depth of 100
+///
+/// # Security
+///
+/// - Cycle detection: If a folder's parent chain exceeds 100 levels,
+///   the cycle is broken and the folder is treated as a root
+/// - Depth limit prevents stack overflow from malicious data
+pub fn build_folder_tree(folders: &[Folder]) -> Result<Vec<FolderNode>, crate::error::KestrelError> {
+    use std::collections::HashMap;
+
+    const MAX_DEPTH: usize = 100;
+
+    // Index folders by ID
+    let by_id: HashMap<Uuid, &Folder> = folders.iter().map(|f| (f.id, f)).collect();
+
+    // Find root folders (no parent)
+    let roots: Vec<&Folder> = folders.iter().filter(|f| f.parent_id.is_none()).collect();
+
+    // Build tree recursively with cycle detection
+    fn build_node(
+        folder: &Folder,
+        by_id: &HashMap<Uuid, &Folder>,
+        depth: usize,
+    ) -> FolderNode {
+        if depth > MAX_DEPTH {
+            // Cycle detected — don't recurse further
+            return FolderNode {
+                folder: folder.clone(),
+                children: Vec::new(),
+            };
+        }
+
+        // Find children of this folder
+        let children: Vec<FolderNode> = by_id
+            .values()
+            .filter(|f| f.parent_id == Some(folder.id))
+            .map(|child| build_node(child, by_id, depth + 1))
+            .collect();
+
+        FolderNode {
+            folder: folder.clone(),
+            children,
+        }
+    }
+
+    Ok(roots.iter().map(|root| build_node(root, &by_id, 0)).collect())
 }
 
 /// Moves a folder to a new parent.

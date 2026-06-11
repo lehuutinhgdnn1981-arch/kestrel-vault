@@ -9,17 +9,20 @@
 //! - **entry**: Vault entry types (structs for entries, create/update requests)
 //! - **folder**: Folder organization and hierarchical structure
 //! - **search**: Secure search that doesn't leak plaintext patterns
+//! - **service**: Concrete implementation bridging crypto + database
 //!
 //! # Security
 //!
 //! - Passwords are encrypted with AES-256-GCM before storage
 //! - Search operates on encrypted indices, never decrypted plaintext
-//! - Folder names are stored in the database but never logged
+//! - Folder names are encrypted to prevent structure leakage
 //! - All vault operations are recorded in the audit log
+//! - The DEK is used for field-level encryption (never the KEK)
 
 pub mod entry;
 pub mod folder;
 pub mod search;
+pub mod service;
 
 use crate::error::KestrelError;
 use crate::vault::entry::{CreateEntryRequest, UpdateEntryRequest, VaultEntry};
@@ -56,3 +59,6 @@ pub trait VaultService {
     /// Searches vault entries by criteria.
     async fn search_entries(&self, query: &str) -> Result<Vec<VaultEntry>, KestrelError>;
 }
+
+// Re-export the service implementation
+pub use service::VaultServiceImpl;

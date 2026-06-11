@@ -32,7 +32,9 @@
 //! ## folders
 //!
 //! Hierarchical folder structure for organizing vault entries.
-//! Folder names are stored as plaintext (not sensitive).
+//! Folder names are stored as encrypted BLOBs to prevent
+//! organizational structure leakage. Each folder also has
+//! a per-entry nonce for AES-256-GCM encryption.
 //!
 //! ## secure_notes
 //!
@@ -56,7 +58,7 @@ use sqlx::SqlitePool;
 
 /// The current expected schema version.
 /// Increment this when adding new migrations.
-const CURRENT_SCHEMA_VERSION: u32 = 7;
+const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 /// SQL to create the schema version tracking table.
 const CREATE_VERSION_TABLE: &str = r#"
@@ -109,6 +111,11 @@ const CREATE_VAULT_ENTRIES: &str = r#"
 "#;
 
 /// Migration 4: Create folders table.
+///
+/// Note: The original migration used `name TEXT NOT NULL` without a
+/// nonce column. Migration 8 updates this to use `name BLOB NOT NULL`
+/// and adds the `nonce BLOB NOT NULL` column. This original DDL is
+/// kept for reference but Migration 8 patches existing databases.
 const CREATE_FOLDERS: &str = r#"
     CREATE TABLE IF NOT EXISTS folders (
         id TEXT PRIMARY KEY,
@@ -168,6 +175,41 @@ const CREATE_FILE_ENTRIES_AND_INDEXES: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_vault_entries_updated ON vault_entries(updated_at);
     CREATE INDEX IF NOT EXISTS idx_secure_notes_folder ON secure_notes(folder_id);
     CREATE INDEX IF NOT EXISTS idx_file_entries_folder ON file_entries(folder_id);
+"#;
+
+/// Migration 8: Fix folders table — add nonce column and convert
+/// name from TEXT to encrypted BLOB.
+///
+/// The original folders schema stored folder names as plaintext TEXT.
+/// This migration adds the `nonce` column required for AES-256-GCM
+/// encryption and converts the table to use BLOB for the name field.
+///
+/// Since SQLite doesn't support ALTER COLUMN, we recreate the table:
+/// 1. Create a new table with the correct schema
+/// 2. Copy existing data (existing TEXT names remain readable as BLOB)
+/// 3. Drop the old table
+/// 4. Rename the new table
+const FIX_FOLDERS_ENCRYPTION: &str = r#"
+    -- Step 1: Create new folders table with correct schema
+    CREATE TABLE IF NOT EXISTS folders_new (
+        id TEXT PRIMARY KEY,
+        name BLOB NOT NULL,
+        parent_id TEXT,
+        nonce BLOB NOT NULL DEFAULT X'000000000000000000000000',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (parent_id) REFERENCES folders_new(id) ON DELETE CASCADE
+    );
+
+    -- Step 2: Copy existing data (TEXT name becomes BLOB automatically in SQLite)
+    INSERT INTO folders_new (id, name, parent_id, created_at, updated_at)
+    SELECT id, name, parent_id, created_at, updated_at FROM folders;
+
+    -- Step 3: Drop old table
+    DROP TABLE folders;
+
+    -- Step 4: Rename new table
+    ALTER TABLE folders_new RENAME TO folders;
 "#;
 
 /// A single migration definition.
@@ -230,6 +272,12 @@ pub fn get_migrations() -> Vec<Migration> {
             name: "create_file_entries_and_indexes",
             checksum: "sha256:y5z6a7b8_file_entries",
             sql: CREATE_FILE_ENTRIES_AND_INDEXES,
+        },
+        Migration {
+            version: 8,
+            name: "fix_folders_encryption",
+            checksum: "sha256:c9d0e1f2_folders_v2_encrypted",
+            sql: FIX_FOLDERS_ENCRYPTION,
         },
     ]
 }
@@ -445,6 +493,18 @@ mod tests {
         assert!(
             CREATE_VAULT_META.contains("kdf_version"),
             "vault_meta must include kdf_version for parameter versioning"
+        );
+    }
+
+    #[test]
+    fn folders_migration_adds_nonce() {
+        assert!(
+            FIX_FOLDERS_ENCRYPTION.contains("nonce BLOB NOT NULL"),
+            "Migration 8 must add nonce BLOB NOT NULL to folders"
+        );
+        assert!(
+            FIX_FOLDERS_ENCRYPTION.contains("name BLOB NOT NULL"),
+            "Migration 8 must convert name to BLOB in folders"
         );
     }
 

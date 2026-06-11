@@ -27,3 +27,28 @@ Stage Summary:
 - Key rotation implemented with RotationKeyPair and re_encrypt_field
 - Auto-lock checking added to all vault commands via validate_session()
 - emit_rejection bug fixed: rejected transitions now properly emit audit events
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Phase 03: Database Integration + VaultService
+
+Work Log:
+- Analyzed entire codebase: all Phase 02 crypto modules complete, all DB repos already exist
+- Found schema mismatch: folders migration (v4) had `name TEXT NOT NULL` without `nonce` column, but FolderRepo expects `name BLOB` and `nonce BLOB`
+- Added Migration 8 (`fix_folders_encryption`): recreates folders table with `name BLOB NOT NULL` and `nonce BLOB NOT NULL DEFAULT X'000000000000000000000000'` — uses table recreation approach since SQLite doesn't support ALTER COLUMN
+- Updated CURRENT_SCHEMA_VERSION from 7 to 8
+- Updated migration docs in module-level comments
+- Added test `folders_migration_adds_nonce` to verify Migration 8 correctness
+- Created `vault/service.rs` — VaultServiceImpl: concrete implementation bridging crypto (DEK via VaultCryptoService) with database (repos). Implements full CRUD for entries with automatic encrypt/decrypt, folder operations with encrypted names, audit logging, and password reveal with DecryptedField auto-zeroization
+- Updated `vault/mod.rs`: added `service` module and `VaultServiceImpl` re-export
+- Implemented `build_folder_tree()` in `vault/folder.rs`: recursive tree building with cycle detection (max depth 100), replaces TODO placeholder
+- Implemented search utilities in `vault/search.rs`: `normalize_search_term()`, `tokenize()`, `SearchQuery::like_pattern()`, replaced TODO placeholders with working implementations and added 5 new tests
+- All vault entry operations in service.rs follow the pattern: plaintext → encrypt with DEK → persist envelope bytes → return domain type
+
+Stage Summary:
+- Migration 8 fixes folders schema (BLOB name + nonce column)
+- VaultServiceImpl bridges crypto + database layer (core Phase 03/04 deliverable)
+- Folder tree building implemented with cycle detection
+- Search tokenization and normalization implemented
+- Next: wire VaultServiceImpl into vault_commands.rs and auth_commands.rs for DB persistence

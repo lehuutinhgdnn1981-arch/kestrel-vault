@@ -41,7 +41,10 @@ use crate::commands::types::{
 use crate::crypto::keywrap::DataEncryptionKey;
 use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::{VaultCryptoService, field_names};
+use crate::db::vault_entry_repo::{VaultEntryRepo, CreateVaultEntryRequest};
 use crate::security::vault_state::VaultState;
+use crate::vault::entry::CreateEntryRequest;
+use crate::vault::service::VaultServiceImpl;
 use tauri::State;
 use zeroize::Zeroize;
 
@@ -117,60 +120,28 @@ pub fn vault_create_entry(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let crypto_service = VaultCryptoService::new_dek(&dek);
 
-    let entry_id = uuid::Uuid::new_v4().to_string();
+    // ── Get database pool ──
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
 
-    // ── Encrypt sensitive fields using DEK via SecureString ──
-    let encrypted_password = {
-        let secure_password = SecureString::from(password);
-        let result = crypto_service.encrypt_field(&entry_id, field_names::PASSWORD, secure_password.as_bytes());
-        // secure_password is zeroized when it goes out of scope
-        match result {
-            Ok(enc) => enc.envelope_bytes,
-            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-        }
+    // ── Use VaultServiceImpl to create entry ──
+    let service = VaultServiceImpl::new(&dek, pool);
+    let create_request = CreateEntryRequest {
+        title: title.clone(),
+        username: username.clone(),
+        password,
+        url,
+        notes,
+        folder_id: folder_id.and_then(|s| uuid::Uuid::parse_str(&s).ok()),
+        tags,
     };
 
-    let encrypted_url = match &url {
-        Some(u) if !u.is_empty() => {
-            match crypto_service.encrypt_field(&entry_id, field_names::URL, u.as_bytes()) {
-                Ok(enc) => enc.envelope_bytes,
-                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-            }
-        }
-        _ => Vec::new(),
-    };
-
-    let encrypted_notes = match &notes {
-        Some(n) if !n.is_empty() => {
-            match crypto_service.encrypt_field(&entry_id, field_names::NOTES, n.as_bytes()) {
-                Ok(enc) => enc.envelope_bytes,
-                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-            }
-        }
-        _ => Vec::new(),
-    };
-
-    let encrypted_tags = if !tags.is_empty() {
-        match serde_json::to_vec(&tags) {
-            Ok(tags_bytes) => {
-                match crypto_service.encrypt_field(&entry_id, field_names::TAGS, &tags_bytes) {
-                    Ok(enc) => enc.envelope_bytes,
-                    Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-                }
-            }
-            Err(_) => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
-
-    // ── Persist to database ──
-    // TODO: Insert into database via VaultEntryRepo
-    // The encrypted_* envelope bytes are ready for storage as BLOBs.
-    // Also store: id, title (plaintext for search), username (plaintext
-    // for search), folder_id, created_at, updated_at
+    let entry = crate::commands::async_runtime::block_on(async {
+        service.create_entry(create_request).await
+    }).map_err(CommandError::from_kestrel)?;
 
     // ── Record activity (extends auto-lock timer) ──
     {
@@ -181,22 +152,18 @@ pub fn vault_create_entry(
         sm.record_activity();
     }
 
-    // TODO: Audit log: EntryCreated { entry_id }
-
-    tracing::info!("Vault entry created: id={}", entry_id);
+    tracing::info!("Vault entry created: id={}", entry.id);
 
     CommandResult::ok(VaultEntryResponse {
-        id: entry_id,
-        title,
-        username,
-        url,
-        folder_id,
-        has_totp: false,
-        notes_preview: notes.map(|n| {
-            if n.len() > 100 { n[..100].to_string() } else { n }
-        }),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        updated_at: chrono::Utc::now().to_rfc3339(),
+        id: entry.id.to_string(),
+        title: entry.title,
+        username: entry.username,
+        url: None, // URL is encrypted — frontend doesn't get it from list
+        folder_id: entry.folder_id.map(|u| u.to_string()),
+        has_totp: entry.has_totp(),
+        notes_preview: None, // Notes are encrypted
+        created_at: entry.created_at.to_rfc3339(),
+        updated_at: entry.updated_at.to_rfc3339(),
     })
 }
 
@@ -232,6 +199,24 @@ pub fn vault_get_entry(
 
     validate_uuid(&id, "id")?;
 
+    // ── Get DEK and database ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
+    })?;
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
+
+    // ── Load entry from database ──
+    let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
+        CommandError::validation("Invalid entry UUID")
+    })?;
+    let service = VaultServiceImpl::new(&dek, pool);
+    let entry = crate::commands::async_runtime::block_on(async {
+        service.get_entry(entry_id).await
+    }).map_err(CommandError::from_kestrel)?;
+
     // ── Record activity ──
     {
         let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
@@ -241,10 +226,17 @@ pub fn vault_get_entry(
         sm.record_activity();
     }
 
-    // TODO: Load from database via VaultEntryRepo
-    // TODO: Map to VaultEntryResponse (no password)
-
-    CommandResult::Err(CommandError::validation("Not yet implemented"))
+    CommandResult::ok(VaultEntryResponse {
+        id: entry.id.to_string(),
+        title: entry.title,
+        username: entry.username,
+        url: None,
+        folder_id: entry.folder_id.map(|u| u.to_string()),
+        has_totp: entry.has_totp(),
+        notes_preview: None,
+        created_at: entry.created_at.to_rfc3339(),
+        updated_at: entry.updated_at.to_rfc3339(),
+    })
 }
 
 /// Updates an existing vault entry.
@@ -402,6 +394,24 @@ pub fn vault_delete_entry(
         ));
     }
 
+    // ── Get DEK and database ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
+    })?;
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
+
+    // ── Delete via service ──
+    let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
+        CommandError::validation("Invalid entry UUID")
+    })?;
+    let service = VaultServiceImpl::new(&dek, pool);
+    crate::commands::async_runtime::block_on(async {
+        service.delete_entry(entry_id).await
+    }).map_err(CommandError::from_kestrel)?;
+
     // ── Record activity ──
     {
         let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
@@ -410,9 +420,6 @@ pub fn vault_delete_entry(
         });
         sm.record_activity();
     }
-
-    // TODO: Delete from database via VaultEntryRepo
-    // TODO: Audit log: EntryDeleted { entry_id }
 
     tracing::info!("Vault entry deleted: id={}", id);
 
@@ -452,8 +459,24 @@ pub fn vault_list_entries(
     if let Some(ref fid) = folder_id {
         validate_uuid(fid, "folder_id")?;
     }
-    let _limit = limit.unwrap_or(50).min(200);
-    let _offset = offset.unwrap_or(0).max(0);
+    let limit = limit.unwrap_or(50).min(200);
+    let offset = offset.unwrap_or(0).max(0);
+
+    // ── Get DEK and database ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
+    })?;
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
+
+    // ── List entries via service ──
+    let service = VaultServiceImpl::new(&dek, pool);
+    let folder_uuid = folder_id.and_then(|s| uuid::Uuid::parse_str(&s).ok());
+    let entries = crate::commands::async_runtime::block_on(async {
+        service.list_entries(folder_uuid, limit, offset).await
+    }).map_err(CommandError::from_kestrel)?;
 
     // ── Record activity ──
     {
@@ -464,10 +487,20 @@ pub fn vault_list_entries(
         sm.record_activity();
     }
 
-    // TODO: Load entries from database via VaultEntryRepo
-    // TODO: Map to VaultEntryResponse (no passwords)
+    // Map entries to responses (no passwords)
+    let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
+        id: e.id.to_string(),
+        title: e.title,
+        username: e.username,
+        url: None,
+        folder_id: e.folder_id.map(|u| u.to_string()),
+        has_totp: e.has_totp(),
+        notes_preview: None,
+        created_at: e.created_at.to_rfc3339(),
+        updated_at: e.updated_at.to_rfc3339(),
+    }).collect();
 
-    CommandResult::ok(Vec::new())
+    CommandResult::ok(responses)
 }
 
 /// Searches vault entries by title and username.
@@ -501,7 +534,22 @@ pub fn vault_search_entries(
     state.validate_session()?;
 
     validate_field(&query, 256, "Query")?;
-    let _limit = limit.unwrap_or(50).min(200);
+    let limit = limit.unwrap_or(50).min(200);
+
+    // ── Get DEK and database ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
+    })?;
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
+
+    // ── Search via service ──
+    let service = VaultServiceImpl::new(&dek, pool);
+    let entries = crate::commands::async_runtime::block_on(async {
+        service.search_entries(&query, limit).await
+    }).map_err(CommandError::from_kestrel)?;
 
     // ── Record activity ──
     {
@@ -512,9 +560,19 @@ pub fn vault_search_entries(
         sm.record_activity();
     }
 
-    // TODO: Search database by title/username via VaultEntryRepo
+    let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
+        id: e.id.to_string(),
+        title: e.title,
+        username: e.username,
+        url: None,
+        folder_id: e.folder_id.map(|u| u.to_string()),
+        has_totp: e.has_totp(),
+        notes_preview: None,
+        created_at: e.created_at.to_rfc3339(),
+        updated_at: e.updated_at.to_rfc3339(),
+    }).collect();
 
-    CommandResult::ok(Vec::new())
+    CommandResult::ok(responses)
 }
 
 /// Reveals the password for a specific entry.
@@ -551,11 +609,29 @@ pub fn vault_reveal_password(
 
     validate_uuid(&id, "id")?;
 
-    // ── Get DEK for decryption ──
+    // ── Get DEK and database ──
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let crypto_service = VaultCryptoService::new_dek(&dek);
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
+
+    // ── Reveal password via service ──
+    let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
+        CommandError::validation("Invalid entry UUID")
+    })?;
+    let service = VaultServiceImpl::new(&dek, pool);
+    let decrypted = crate::commands::async_runtime::block_on(async {
+        service.reveal_password(entry_id).await
+    }).map_err(CommandError::from_kestrel)?;
+
+    // Convert decrypted bytes to String
+    let password_string = String::from_utf8(decrypted.plaintext.clone())
+        .map_err(|_| CommandError::from_kestrel(
+            crate::error::KestrelError::Crypto("Password is not valid UTF-8".to_string())
+        ))?;
 
     // ── Record activity ──
     {
@@ -566,24 +642,11 @@ pub fn vault_reveal_password(
         sm.record_activity();
     }
 
-    // TODO: Load encrypted password envelope bytes from database via VaultEntryRepo
-    // The decryption flow using the DEK:
-    //
-    // 1. Load encrypted_password BLOB from database for the given entry_id
-    // 2. Decrypt using crypto_service.decrypt_field(&id, "password", &envelope_bytes)
-    // 3. Convert decrypted bytes to String
-    // 4. Return with auto-clear metadata
-    // 5. Audit log: PasswordRevealed { entry_id }
-    //
-    // let encrypted_bytes = VaultEntryRepo::get_encrypted_password(pool, &id).await?;
-    // let decrypted = crypto_service.decrypt_field(&id, field_names::PASSWORD, &encrypted_bytes)?;
-    // let password_string = String::from_utf8(decrypted.plaintext)
-    //     .map_err(|_| KestrelError::Crypto("Password is not valid UTF-8".to_string()))?;
+    tracing::warn!("Password reveal completed for entry: {}", id);
+    // decrypted is zeroized when it goes out of scope
 
-    // TODO: Audit log: PasswordRevealed { entry_id }
-    tracing::warn!("Password reveal requested for entry: {}", id);
-
-    CommandResult::Err(CommandError::validation(
-        "Password reveal requires database integration",
-    ))
+    CommandResult::ok(PasswordRevealResponse {
+        password: password_string,
+        auto_clear_seconds: DEFAULT_AUTO_CLEAR_SECONDS,
+    })
 }

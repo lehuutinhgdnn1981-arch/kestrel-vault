@@ -7,20 +7,24 @@
 //!
 //! Traditional search would require decrypting all entries to match
 //! against query terms, which exposes plaintext in memory. Instead,
-//! we use an index-based approach:
+//! we use a two-tier approach:
 //!
-//! 1. At entry creation time, a search index is built from non-sensitive
-//!    metadata (title, URL, tags)
-//! 2. The index is stored in the database alongside encrypted data
-//! 3. Search queries match against the index, never against plaintext
-//! 4. Passwords are never included in the search index
+//! 1. **Plaintext search**: Non-sensitive fields (title, username) are
+//!    stored as plaintext in the database for fast SQL LIKE queries.
+//!    This is safe because titles and usernames are not secrets.
 //!
-//! # TODO (Phase 2)
+//! 2. **Encrypted search index** (future): For searching within
+//!    encrypted fields (notes, URLs), we will use HMAC-based blind
+//!    indexing with the search sub-key derived from the DEK via HKDF.
+//!    This allows matching without decrypting all entries.
 //!
-//! - Implement encrypted search index using bloom filters
-//! - Add fuzzy matching for titles
-//! - Add search result ranking
-//! - Add search query sanitization
+//! # Current Implementation
+//!
+//! Currently, search operates on plaintext metadata fields only:
+//! - `title` (VARCHAR in vault_entries)
+//! - `username` (VARCHAR in vault_entries)
+//!
+//! Passwords are NEVER included in search results or indices.
 
 use crate::error::KestrelError;
 use crate::vault::entry::VaultEntry;
@@ -66,6 +70,14 @@ impl SearchQuery {
         }
         Ok(())
     }
+
+    /// Returns the SQL LIKE pattern for this query.
+    ///
+    /// The pattern wraps the search term with `%` wildcards
+    /// for case-insensitive substring matching.
+    pub fn like_pattern(&self) -> String {
+        format!("%{}%", self.term.trim())
+    }
 }
 
 /// A search result with relevance scoring.
@@ -77,27 +89,28 @@ pub struct SearchResult {
     pub score: f64,
 }
 
-/// Performs a secure search against the vault index.
+/// Normalizes a string for search matching.
 ///
-/// # Security
+/// Converts to lowercase and collapses whitespace for
+/// case-insensitive matching.
+pub fn normalize_search_term(term: &str) -> String {
+    term.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Tokenizes a search term into individual words.
 ///
-/// This function only searches non-sensitive indexed fields.
-/// Passwords and encrypted notes are never searched.
-///
-/// # TODO (Phase 2)
-///
-/// - Implement actual index-based search
-/// - Add ranking algorithm
-/// - Add fuzzy matching
-pub fn search_entries(
-    _query: &SearchQuery,
-) -> Result<Vec<SearchResult>, KestrelError> {
-    // TODO: Implement in Phase 2
-    // 1. Sanitize the search query
-    // 2. Query the search index in the database
-    // 3. Rank results by relevance
-    // 4. Return matched entries with scores
-    Ok(Vec::new())
+/// Splits on whitespace and punctuation, normalizes to lowercase.
+/// Used for multi-word search queries where each word is
+/// matched independently.
+pub fn tokenize(term: &str) -> Vec<String> {
+    term.to_lowercase()
+        .split(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Builds the search index for a vault entry.
@@ -110,16 +123,19 @@ pub fn search_entries(
 /// Only non-sensitive fields are indexed. Passwords and notes
 /// are never included in the search index.
 ///
-/// # TODO (Phase 2)
+/// # Current Implementation
 ///
-/// - Implement index building
-/// - Add tokenization and normalization
-/// - Add index persistence
+/// In the current implementation, search is performed directly
+/// on the plaintext `title` and `username` columns in the database
+/// using SQL LIKE. This function is a placeholder for future
+/// HMAC-based blind indexing using the search sub-key.
 pub fn build_search_index(_entry: &VaultEntry) -> Result<(), KestrelError> {
-    // TODO: Implement in Phase 2
+    // Future implementation will:
     // 1. Extract title, URL, and tags from the entry
     // 2. Tokenize and normalize the terms
-    // 3. Store in the search index table
+    // 3. HMAC each token with the search sub-key
+    // 4. Store HMAC(token) in a search_index table
+    // 5. On search, HMAC the query term and match against stored HMACs
     Ok(())
 }
 
@@ -149,5 +165,35 @@ mod tests {
     fn search_query_validates_too_long() {
         let query = SearchQuery::new("a".repeat(257));
         assert!(query.validate().is_err());
+    }
+
+    #[test]
+    fn search_query_like_pattern() {
+        let query = SearchQuery::new("github".to_string());
+        assert_eq!(query.like_pattern(), "%github%");
+    }
+
+    #[test]
+    fn normalize_search_term_lowercase() {
+        assert_eq!(normalize_search_term("GitHub"), "github");
+        assert_eq!(normalize_search_term("  Hello   World  "), "hello world");
+    }
+
+    #[test]
+    fn tokenize_splits_correctly() {
+        let tokens = tokenize("Hello, World! Foo-Bar");
+        assert_eq!(tokens, vec!["hello", "world", "foo", "bar"]);
+    }
+
+    #[test]
+    fn tokenize_handles_empty() {
+        let tokens = tokenize("");
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn tokenize_handles_whitespace_only() {
+        let tokens = tokenize("   ");
+        assert!(tokens.is_empty());
     }
 }

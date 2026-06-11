@@ -28,6 +28,30 @@ pub mod settings_commands;
 pub mod types;
 pub mod vault_commands;
 
+/// Provides a simple async runtime for blocking on async operations
+/// from synchronous Tauri command handlers.
+///
+/// Tauri command handlers are synchronous by default, but our service
+/// layer (VaultServiceImpl) uses async database operations. This module
+/// provides a way to block_on async calls from sync command handlers.
+pub mod async_runtime {
+    use tokio::runtime::Runtime;
+
+    thread_local! {
+        static RUNTIME: Runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    }
+
+    /// Blocks on an async future from a synchronous context.
+    ///
+    /// Uses a thread-local Tokio runtime to avoid the "Cannot start
+    /// a runtime from within a runtime" panic that would occur if
+    /// we tried to use tokio::runtime::Handle::block_on from within
+    /// a Tauri async command.
+    pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        RUNTIME.with(|rt| rt.block_on(future))
+    }
+}
+
 // Re-export command types for convenience
 pub use types::{
     AppSettingsResponse, AuditEventResponse, AuditPageResponse, ChangePasswordRequest,
