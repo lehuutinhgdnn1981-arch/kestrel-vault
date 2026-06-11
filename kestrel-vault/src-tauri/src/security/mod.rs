@@ -39,8 +39,10 @@
 pub mod lockout;
 pub mod rate_limit;
 pub mod session;
+pub mod vault_state;
 
 // Re-export key types for convenience
 pub use lockout::{FailedAttemptTracker, LockoutState};
 pub use rate_limit::{Operation, RateLimiter};
 pub use session::{Session, SessionId, SessionState};
+pub use vault_state::{VaultState, VaultStateMachine, VaultTransition, TransitionResult, VaultStateEvent};

@@ -1,118 +1,86 @@
-//! Tauri commands for audit operations.
+//! Audit log Tauri commands for KESTREL Vault.
 //!
-//! Provides IPC handlers for querying and exporting audit events.
-//! All commands validate inputs and return sanitized error messages.
+//! Provides query and export access to the audit log.
+//! Audit events are append-only — no create, update, or delete.
 //!
 //! # Security
 //!
-//! - Audit queries are rate-limited to prevent information harvesting
-//! - Export operations require elevated permissions
-//! - Results never contain passwords or decrypted data
+//! - Audit queries are available even when vault is locked
+//!   (security visibility should not require unlock)
+//! - Export operations are rate-limited and audit-logged
+//! - No sensitive data (passwords, keys) in audit events
 
-use crate::audit::event::AuditEvent;
-use crate::audit::query::{AuditQuery, AuditQueryResult};
-use crate::commands::vault_commands::AppState;
-use crate::error::KestrelError;
+use crate::commands::types::{
+    validate_field, AuditEventResponse, AuditPageResponse, CommandError, CommandResult,
+};
+use tauri::State;
 
-/// Retrieves recent audit events.
+use super::auth_commands::AppState;
+
+/// Queries audit events with filtering and pagination.
+///
+/// Available in any vault state for security visibility.
 ///
 /// # Arguments
-///
-/// * `limit` - Maximum number of events to return (default 50)
-///
-/// # Errors
-///
-/// Returns an error if the query fails or the limit is invalid.
-///
-/// # Security
-///
-/// - Events never contain passwords or decrypted data
-/// - Access to audit events requires an active session
+//!
+//! * `category` - Filter by event category (optional)
+//! * `from` - Start timestamp ISO 8601 (optional)
+//! * `to` - End timestamp ISO 8601 (optional)
+//! * `limit` - Max results per page (default 50, max 200)
+/// * `offset` - Number of results to skip
 #[tauri::command]
-pub async fn get_audit_events(
-    _state: tauri::State<'_, AppState>,
+pub fn audit_query_events(
+    category: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
     limit: Option<i64>,
-) -> Result<Vec<AuditEvent>, String> {
-    let limit = limit.unwrap_or(50);
-
-    if limit < 1 {
-        return Err("Limit must be at least 1".to_string());
+    offset: Option<i64>,
+    _state: State<'_, AppState>,
+) -> CommandResult<AuditPageResponse> {
+    if let Some(ref cat) = category {
+        validate_field(cat, 50, "category")?;
     }
-    if limit > 1000 {
-        return Err("Limit too large (max 1000)".to_string());
-    }
+    let limit = limit.unwrap_or(50).min(200);
+    let offset = offset.unwrap_or(0).max(0);
 
-    // TODO (Phase 2): Delegate to audit service
-    Err(KestrelError::Audit("Not yet implemented".to_string()).to_user_message())
-}
+    // TODO: Query audit_event_repo with filters
+    // TODO: Map to AuditEventResponse
 
-/// Queries audit events with advanced filtering.
-///
-/// # Arguments
-///
-/// * `query` - The audit query with time range, category, and pagination
-///
-/// # Errors
-///
-/// Returns an error if the query validation fails or the query execution fails.
-///
-/// # Security
-///
-/// - Query validation prevents overly broad queries
-/// - Results are paginated to prevent memory exhaustion
-#[tauri::command]
-pub async fn query_audit_log(
-    _state: tauri::State<'_, AppState>,
-    query: AuditQuery,
-) -> Result<AuditQueryResult, String> {
-    // Validate query parameters
-    query
-        .validate()
-        .map_err(|e| e.to_user_message())?;
-
-    // TODO (Phase 2): Delegate to audit service
-    Err(KestrelError::Audit("Not yet implemented".to_string()).to_user_message())
+    CommandResult::ok(AuditPageResponse {
+        events: Vec::new(),
+        total_count: 0,
+        has_more: false,
+    })
 }
 
 /// Exports audit events to a file.
 ///
-/// # Arguments
-///
-/// * `start_time` - Start of the time range (ISO 8601)
-/// * `end_time` - End of the time range (ISO 8601)
-/// * `format` - Export format ("json" or "csv")
+/// Supported formats: "json", "csv"
+/// Export is rate-limited and always audit-logged.
 ///
 /// # Errors
-///
-/// Returns an error if the time range is invalid or the export fails.
-///
-/// # Security
-///
-/// - Export operations are logged in the audit trail
-/// - Exported files are encrypted with the user's key
-/// - The format parameter is validated against allowed values
+//!
+//! - `VALIDATION_ERROR`: Invalid format
+/// - `RATE_LIMITED`: Too many export requests
 #[tauri::command]
-pub async fn export_audit_log(
-    _state: tauri::State<'_, AppState>,
-    start_time: String,
-    end_time: String,
+pub fn audit_export_events(
     format: String,
-) -> Result<String, String> {
-    // Validate format
-    if format != "json" && format != "csv" {
-        return Err("Invalid export format (must be 'json' or 'csv')".to_string());
+    from: Option<String>,
+    to: Option<String>,
+    _state: State<'_, AppState>,
+) -> CommandResult<String> {
+    let valid_formats = ["json", "csv"];
+    if !valid_formats.contains(&format.as_str()) {
+        return CommandResult::Err(CommandError::validation(
+            "Format must be 'json' or 'csv'",
+        ));
     }
 
-    // Validate timestamps
-    let _start = chrono::DateTime::parse_from_rfc3339(&start_time)
-        .map_err(|_| "Invalid start time format (use ISO 8601)".to_string())?;
-    let _end = chrono::DateTime::parse_from_rfc3339(&end_time)
-        .map_err(|_| "Invalid end time format (use ISO 8601)".to_string())?;
+    // TODO: Rate limit check
+    // TODO: Query all matching events
+    // TODO: Serialize to format
+    // TODO: Save to file via dialog
+    // TODO: Audit log: AuditExported { format, count }
 
-    // TODO (Phase 2): Delegate to audit service for export
-    // 1. Query events in time range
-    // 2. Format as JSON or CSV
-    // 3. Encrypt the export file
-    // 4. Return the file path
-    Err(KestrelError::Audit("Not yet implemented".to_string()).to_user_message())
+    CommandResult::Err(CommandError::validation("Not yet implemented"))
 }

@@ -20,10 +20,16 @@
 //! - `repository`: Generic repository pattern for CRUD operations
 //! - `migrations`: Database schema migration management
 
+pub mod audit_event_repo;
 pub mod connection;
 pub mod migrations;
 pub mod repository;
+pub mod vault_entry_repo;
+pub mod vault_meta_repo;
 
 // Re-export key types
 pub use connection::DbConnection;
 pub use repository::Repository;
+pub use audit_event_repo::{AuditEventRepo, AuditEventRow, CreateAuditEventRequest};
+pub use vault_entry_repo::VaultEntryRepo;
+pub use vault_meta_repo::{VaultMeta, VaultMetaRepo};

@@ -26,6 +26,7 @@ pub mod scanner;
 pub mod security;
 pub mod vault;
 
+use commands::auth_commands::AppState;
 use tauri::Manager;
 
 /// Initializes and runs the Tauri application.
@@ -36,6 +37,7 @@ use tauri::Manager;
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(AppState::default())
         .setup(|app| {
             // Initialize tracing subscriber for structured logging
             tracing_subscriber::fmt()
@@ -51,25 +53,40 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // TODO: Load application configuration
             // TODO: Initialize audit logger
             // TODO: Set up auto-lock timer
+            // TODO: Initialize VaultStateMachine in AppState
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::vault_commands::create_entry,
-            commands::vault_commands::get_entry,
-            commands::vault_commands::update_entry,
-            commands::vault_commands::delete_entry,
-            commands::vault_commands::list_entries,
-            commands::vault_commands::search_entries,
-            commands::audit_commands::get_audit_events,
-            commands::audit_commands::query_audit_log,
-            commands::audit_commands::export_audit_log,
-            commands::scanner_commands::scan_password_strength,
-            commands::scanner_commands::check_breach_status,
-            commands::scanner_commands::run_vulnerability_scan,
-            commands::crypto_commands::derive_key,
-            commands::crypto_commands::encrypt_data,
-            commands::crypto_commands::decrypt_data,
+            // Auth commands
+            commands::auth_commands::auth_initialize_vault,
+            commands::auth_commands::auth_unlock,
+            commands::auth_commands::auth_lock,
+            commands::auth_commands::auth_get_session,
+            commands::auth_commands::auth_is_vault_initialized,
+            commands::auth_commands::auth_change_password,
+            // Vault commands
+            commands::vault_commands::vault_create_entry,
+            commands::vault_commands::vault_get_entry,
+            commands::vault_commands::vault_update_entry,
+            commands::vault_commands::vault_delete_entry,
+            commands::vault_commands::vault_list_entries,
+            commands::vault_commands::vault_search_entries,
+            commands::vault_commands::vault_reveal_password,
+            // Audit commands
+            commands::audit_commands::audit_query_events,
+            commands::audit_commands::audit_export_events,
+            // Scanner commands
+            commands::scanner_commands::scanner_password_strength,
+            commands::scanner_commands::scanner_check_breach,
+            commands::scanner_commands::scanner_run_full_scan,
+            // Crypto commands (RESTRICTED)
+            commands::crypto_commands::crypto_derive_key,
+            commands::crypto_commands::crypto_encrypt_data,
+            commands::crypto_commands::crypto_decrypt_data,
+            // Settings commands
+            commands::settings_commands::settings_get,
+            commands::settings_commands::settings_update,
         ])
         .run(tauri::generate_context!())?;
 

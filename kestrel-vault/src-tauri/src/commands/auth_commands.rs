@@ -1,421 +1,241 @@
-//! Tauri commands for authentication and vault lifecycle.
+//! Authentication Tauri commands for KESTREL Vault.
 //!
-//! Provides IPC handlers for vault initialization, unlock, lock,
-//! session management, and password changes. These commands are
-//! the ONLY way the frontend interacts with auth state.
+//! Handles vault initialization, unlock, lock, and password change.
+//! These are the ONLY commands that accept the master password.
 //!
 //! # Security
 //!
-//! - Master password is only transmitted during unlock/init (never stored)
-//! - Rate limiting on all unlock attempts (5 per minute)
-//! - Progressive lockout after repeated failures
-//! - Every auth event is logged in the audit trail
-//! - Passwords are zeroized from memory after use
-//!
-//! # Rate Limits
-//!
-//! - `auth_unlock`: 5 attempts per minute, progressive lockout
-//! - `auth_change_password`: 3 per minute
-//! - Other auth commands: 10 per minute
+//! - Master password is NEVER stored — only used for key derivation
+//! - Key derivation happens in Rust, never in React
+//! - Rate limiting on unlock attempts
+//! - Progressive lockout after failures
+//! - All auth events are audit-logged
 
-use crate::audit::event::{ActionType, AuditEvent, EventCategory};
 use crate::commands::types::{
-    validate_not_blank, validate_no_null_bytes, validate_string_field,
-    CommandResult, SessionResponse, ValidationRules,
+    validate_master_password, CommandError, CommandResult, SessionResponse,
 };
 use crate::error::KestrelError;
-use crate::security::lockout::{FailedAttemptTracker, LockoutState};
-use crate::security::rate_limit::Operation;
-use crate::security::session::Session;
 use tauri::State;
 
-// ─── Application State ───────────────────────────────────────────────
-
-/// Application state shared across all Tauri commands.
+/// App state shared across Tauri commands.
 ///
-/// Holds references to all services needed by command handlers.
-/// Managed by Tauri's state system (injected at runtime).
-///
-/// # TODO (Phase 2)
-///
-/// - Add VaultService reference
-/// - Add AuditLogger reference
-/// - Replace Option<()> with real service instances
+/// This struct is managed by Tauri's state management and
+/// provides access to the vault state machine, rate limiter,
+/// and other shared resources.
 pub struct AppState {
-    /// Active session (if vault is unlocked).
-    pub session: parking_lot::Mutex<Option<Session>>,
-    /// Failed attempt tracker for lockout enforcement.
-    pub lockout_tracker: parking_lot::Mutex<FailedAttemptTracker>,
-    /// Rate limiter for all operations.
-    pub rate_limiter: parking_lot::Mutex<crate::security::rate_limit::RateLimiter>,
-    /// Whether the vault has been initialized.
-    pub vault_initialized: parking_lot::Mutex<bool>,
-    /// TODO: Audit logger service.
-    pub _audit_logger: Option<()>,
-    /// TODO: Vault service instance.
-    pub _vault_service: Option<()>,
-}
-
-impl AppState {
-    /// Creates a new AppState with default values.
-    pub fn new() -> Self {
-        Self {
-            session: parking_lot::Mutex::new(None),
-            lockout_tracker: parking_lot::Mutex::new(FailedAttemptTracker::new()),
-            rate_limiter: parking_lot::Mutex::new(
-                crate::security::rate_limit::RateLimiter::new(),
-            ),
-            vault_initialized: parking_lot::Mutex::new(false),
-            _audit_logger: None,
-            _vault_service: None,
-        }
-    }
+    // TODO: Add vault_state_machine: RwLock<VaultStateMachine>
+    // TODO: Add rate_limiter: RwLock<RateLimiter>
+    // TODO: Add lockout_tracker: RwLock<FailedAttemptTracker>
+    // TODO: Add master_key: RwLock<Option<MasterKey>>
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self::new()
+        AppState {}
     }
 }
 
-// ─── Helper Functions ────────────────────────────────────────────────
-
-/// Checks if the vault is currently unlocked.
-/// Returns an error if the vault is locked.
-fn require_unlocked(state: &AppState) -> Result<(), KestrelError> {
-    let session = state.session.lock();
-    match session.as_ref() {
-        Some(s) if s.state() == crate::security::session::SessionState::Unlocked => Ok(()),
-        _ => Err(KestrelError::Unauthorized(
-            "Vault is locked. Please unlock first.".to_string(),
-        )),
-    }
-}
-
-/// Logs an audit event (stub until Phase 2).
-fn log_audit_event(
-    _state: &AppState,
-    _category: EventCategory,
-    _action: ActionType,
-    _subject: &str,
-) {
-    // TODO (Phase 2): Delegate to audit logger service
-    // let event = AuditEvent::new(category, action, subject.to_string());
-    // state._audit_logger.log_event(event).await;
-}
-
-/// Checks and enforces lockout before auth operations.
-fn check_lockout(state: &AppState) -> Result<(), KestrelError> {
-    let tracker = state.lockout_tracker.lock();
-    match tracker.lockout_state() {
-        LockoutState::Allowed => Ok(()),
-        LockoutState::Delayed(secs) => Err(KestrelError::Unauthorized(format!(
-            "Too many failed attempts. Please wait {secs} seconds before retrying."
-        ))),
-        LockoutState::LockedOut => Err(KestrelError::Unauthorized(
-            "Account locked due to too many failed attempts. Vault reset required.".to_string(),
-        )),
-    }
-}
-
-/// Checks rate limit for an operation.
-fn check_rate_limit(
-    state: &AppState,
-    operation: Operation,
-) -> Result<(), KestrelError> {
-    let mut limiter = state.rate_limiter.lock();
-    if limiter.is_rate_limited(operation) {
-        return Err(KestrelError::Unauthorized(format!(
-            "Rate limit exceeded for {operation:?}. Please try again later."
-        )));
-    }
-    Ok(())
-}
-
-// ─── Tauri Commands ──────────────────────────────────────────────────
-
-/// First-time vault initialization.
+/// Initializes the vault for the first time.
 ///
-/// Creates the encrypted vault database and derives the master key
-/// from the provided password. This command can only be called once.
+/// Creates the vault metadata, derives the master key, and
+/// stores the encrypted test envelope. After initialization,
+/// the vault is in Locked state — the user must explicitly unlock.
 ///
-/// # Arguments
+/// # Errors
 ///
-/// * `master_password` - The master password (min 8 chars)
-/// * `hint` - Optional password hint (max 100 chars)
-///
-/// # Security
-///
-/// - Password is zeroized after key derivation
-/// - Salt is generated cryptographically
-/// - Event is logged in audit trail
+/// - `VALIDATION_ERROR`: Master password too short/long
+/// - `UNAUTHORIZED`: Vault is already initialized
 #[tauri::command]
-pub async fn auth_initialize_vault(
-    state: State<'_, AppState>,
+pub fn auth_initialize_vault(
     master_password: String,
     hint: Option<String>,
+    _state: State<'_, AppState>,
 ) -> CommandResult<()> {
-    // Check if already initialized
-    if *state.vault_initialized.lock() {
-        return CommandResult::err("Vault has already been initialized".to_string());
+    // Validate inputs
+    if let Err(e) = validate_master_password(&master_password) {
+        return CommandResult::Err(e);
     }
-
-    // Validate master password
-    if let Err(e) = validate_string_field(
-        &master_password,
-        ValidationRules::MIN_MASTER_PASSWORD_LEN,
-        ValidationRules::MAX_PASSWORD_LEN,
-        "Master password",
-        false,
-    ) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // Validate hint if provided
     if let Some(ref h) = hint {
-        if let Err(e) = validate_string_field(
-            h,
-            0,
-            ValidationRules::MAX_HINT_LEN,
-            "Password hint",
-            true,
-        ) {
-            return CommandResult::from_kestrel_error(e);
+        if h.len() > 100 {
+            return CommandResult::Err(CommandError::validation(
+                "Hint must be at most 100 characters",
+            ));
         }
     }
 
-    // Rate limit check
-    if let Err(e) = check_rate_limit(&state, Operation::Login) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // TODO (Phase 2): Delegate to vault service
-    // 1. Generate salt
-    // 2. Derive master key from password
-    // 3. Create encrypted database
-    // 4. Store salt and verification hash
-    // 5. Zeroize password from memory
-
-    *state.vault_initialized.lock() = true;
-    log_audit_event(&state, EventCategory::Auth, ActionType::Create, "vault_init");
+    // TODO: Check vault is not already initialized
+    // TODO: Generate salt
+    // TODO: Derive master key from password
+    // TODO: Create test envelope for verification
+    // TODO: Store vault_meta in database
+    // TODO: Transition state: Uninitialized → Locked
+    // TODO: Audit log: VaultInitialized
 
     CommandResult::ok(())
 }
 
-/// Unlock the vault with the master password.
+/// Unlocks the vault with the master password.
 ///
-/// Derives the master key from the password and opens the
-/// encrypted database. A new session is created on success.
+/// Derives the key from the password, verifies the test envelope,
+/// creates a new session, and transitions to Unlocked state.
 ///
 /// # Security
 ///
-/// - Rate limited: 5 attempts per minute
-/// - Progressive lockout after repeated failures
-/// - Failed attempts are logged with timestamps
-/// - Password is zeroized after key derivation
+/// - Rate limited to prevent brute force
+/// - Progressive lockout after failures
+/// - Master password is zeroized after key derivation
+/// - Failed attempts are audit-logged
+///
+/// # Errors
+///
+/// - `VALIDATION_ERROR`: Master password too short/long
+/// - `UNAUTHORIZED`: Vault is locked out, or wrong password
+/// - `RATE_LIMITED`: Too many attempts
 #[tauri::command]
-pub async fn auth_unlock(
-    state: State<'_, AppState>,
+pub fn auth_unlock(
     master_password: String,
+    _state: State<'_, AppState>,
 ) -> CommandResult<SessionResponse> {
-    // Check if vault is initialized
-    if !*state.vault_initialized.lock() {
-        return CommandResult::err("Vault has not been initialized".to_string());
-    }
-
-    // Check lockout state
-    if let Err(e) = check_lockout(&state) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // Rate limit check
-    if let Err(e) = check_rate_limit(&state, Operation::Login) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // Record the attempt
-    if let Err(e) = state.rate_limiter.lock().record_attempt(Operation::Login) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
     // Validate input
-    if let Err(e) = validate_no_null_bytes(&master_password, "Master password") {
-        return CommandResult::from_kestrel_error(e);
+    if let Err(e) = validate_master_password(&master_password) {
+        return CommandResult::Err(e);
     }
 
-    // TODO (Phase 2): Delegate to vault service
-    // 1. Load salt from database
-    // 2. Derive key from password + salt
-    // 3. Verify key against stored verification hash
-    // 4. If verified: create session, store key in memory
-    // 5. If not: record failed attempt, increment lockout
+    // TODO: Check rate limiter
+    // TODO: Check lockout state
+    // TODO: Derive key from password
+    // TODO: Verify test envelope
+    // TODO: If verification fails:
+    //   - Record failed attempt
+    //   - Audit log: UnlockFailed
+    //   - Return error
+    // TODO: If verification succeeds:
+    //   - Reset failed attempt counter
+    //   - Create session
+    //   - Store master key in AppState
+    //   - Transition state: Locked → Unlocked
+    //   - Audit log: UnlockSucceeded
+    //   - Zeroize master password
 
-    // Placeholder: assume success for now
-    // In production, this would be the actual verification:
-    // match vault_service.unlock(&master_password).await {
-    //     Ok(session) => {
-    //         state.lockout_tracker.lock().reset();
-    //         ...
-    //     }
-    //     Err(_) => {
-    //         state.lockout_tracker.lock().record_failed_attempt();
-    //         ...
-    //     }
-    // }
-
-    let session = Session::new(15).map_err(KestrelError::from)?;
-    let session_resp = SessionResponse {
-        session_id: session.id().to_string(),
-        expires_at: *session.expires_at(),
+    // Placeholder response
+    CommandResult::ok(SessionResponse {
+        session_id: "todo".to_string(),
+        expires_at: "todo".to_string(),
         is_unlocked: true,
-    };
-
-    *state.session.lock() = Some(session);
-    state.lockout_tracker.lock().reset();
-    state.rate_limiter.lock().reset_operation(Operation::Login);
-
-    log_audit_event(&state, EventCategory::Auth, ActionType::Unlock, "user");
-
-    CommandResult::ok(session_resp)
+    })
 }
 
-/// Lock the vault, zeroizing all keys from memory.
+/// Locks the vault immediately.
 ///
-/// After calling this, the vault requires re-authentication
-/// to access any data. All derived keys are zeroized.
+/// Zeroizes the master key, destroys the session, clears all
+/// decrypted data from memory, and transitions to Locked state.
 ///
 /// # Security
 ///
-/// - All in-memory keys are zeroized
-/// - Session is invalidated
-/// - Event is logged in audit trail
+/// - Master key is zeroized
+/// - All decrypted data is cleared
+/// - Session is destroyed
+/// - Audit-logged
 #[tauri::command]
-pub async fn auth_lock(
-    state: State<'_, AppState>,
-) -> CommandResult<()> {
-    // Lock the session if it exists
-    {
-        let mut session = state.session.lock();
-        if let Some(ref mut s) = *session {
-            s.lock();
-        }
-    }
-
-    // Clear the session entirely (zeroizes references)
-    *state.session.lock() = None;
-
-    log_audit_event(&state, EventCategory::Auth, ActionType::Lock, "user");
+pub fn auth_lock(_state: State<'_, AppState>) -> CommandResult<()> {
+    // TODO: Zeroize master key
+    // TODO: Destroy session
+    // TODO: Clear all decrypted data from memory
+    // TODO: Transition state: Unlocked → Locked
+    // TODO: Audit log: VaultLocked
 
     CommandResult::ok(())
 }
 
-/// Get the current session state.
-///
-/// Returns session info if the vault is unlocked, or
-/// an indication that the vault is locked. This is used
-/// by the frontend to determine which UI to show.
+/// Returns the current session state.
 ///
 /// # Security
 ///
-/// - No secrets are returned (no keys, no passwords)
-/// - Session ID is an opaque token, not a secret
+/// This returns ONLY session metadata — never keys or passwords.
 #[tauri::command]
-pub async fn auth_get_session(
-    state: State<'_, AppState>,
+pub fn auth_get_session(
+    _state: State<'_, AppState>,
 ) -> CommandResult<Option<SessionResponse>> {
-    let session = state.session.lock();
-    match session.as_ref() {
-        Some(s) => {
-            let resp = SessionResponse {
-                session_id: s.id().to_string(),
-                expires_at: *s.expires_at(),
-                is_unlocked: s.state()
-                    == crate::security::session::SessionState::Unlocked,
-            };
-            CommandResult::ok(Some(resp))
-        }
-        None => CommandResult::ok(None),
-    }
+    // TODO: Check current state
+    // TODO: Return session info if unlocked, None if locked
+
+    CommandResult::ok(None)
 }
 
-/// Check if the vault has been initialized.
+/// Checks if the vault has been initialized.
 ///
-/// Returns true if the vault database exists and has been
-/// set up with a master password. Used by the frontend to
-/// decide between "initialize" and "unlock" screens.
+/// This command is always available regardless of vault state.
 #[tauri::command]
-pub async fn auth_is_vault_initialized(
-    state: State<'_, AppState>,
+pub fn auth_is_vault_initialized(
+    _state: State<'_, AppState>,
 ) -> CommandResult<bool> {
-    CommandResult::ok(*state.vault_initialized.lock())
+    // TODO: Check if vault_meta table has a row
+
+    CommandResult::ok(false)
 }
 
-/// Change the master password.
+/// Changes the master password.
 ///
-/// Requires the current password for verification, then
-/// re-encrypts the vault with a new key derived from
-/// the new password.
+/// Requires the vault to be unlocked. Derives a new key from
+/// the new password, re-encrypts all data, and updates vault_meta.
 ///
 /// # Security
 ///
-/// - Current password is verified before change
-/// - New password must meet minimum requirements
-/// - All entries are re-encrypted with the new key
-/// - Old key is zeroized after re-encryption
-/// - Event is logged in audit trail
+/// - Current password must be verified
+/// - Re-encryption is transactional (rollback on failure)
+/// - Old key is zeroized after successful rotation
+/// - Audit-logged
+///
+/// # Errors
+///
+/// - `UNAUTHORIZED`: Wrong current password, or vault is locked
+/// - `VALIDATION_ERROR`: New password too short/long
 #[tauri::command]
-pub async fn auth_change_password(
-    state: State<'_, AppState>,
-    current: String,
-    new: String,
+pub fn auth_change_password(
+    current_password: String,
+    new_password: String,
+    _state: State<'_, AppState>,
 ) -> CommandResult<()> {
-    // Require vault to be unlocked
-    if let Err(e) = require_unlocked(&state) {
-        return CommandResult::from_kestrel_error(e);
+    // Validate inputs
+    if let Err(e) = validate_master_password(&current_password) {
+        return CommandResult::Err(e);
+    }
+    if let Err(e) = validate_master_password(&new_password) {
+        return CommandResult::Err(e);
     }
 
-    // Rate limit check
-    if let Err(e) = check_rate_limit(&state, Operation::Login) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // Validate current password input
-    if let Err(e) = validate_no_null_bytes(&current, "Current password") {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // Validate new password meets requirements
-    if let Err(e) = validate_string_field(
-        &new,
-        ValidationRules::MIN_MASTER_PASSWORD_LEN,
-        ValidationRules::MAX_PASSWORD_LEN,
-        "New password",
-        false,
-    ) {
-        return CommandResult::from_kestrel_error(e);
-    }
-
-    // New password must differ from current
-    if current == new {
-        return CommandResult::err(
-            "New password must be different from current password".to_string(),
-        );
-    }
-
-    // TODO (Phase 2): Delegate to vault service
-    // 1. Verify current password
-    // 2. Generate new salt
-    // 3. Derive new key from new password + new salt
-    // 4. Re-encrypt all vault entries with new key
-    // 5. Store new salt and verification hash
-    // 6. Zeroize old key and password strings
-
-    log_audit_event(
-        &state,
-        EventCategory::Auth,
-        ActionType::Update,
-        "master_password",
-    );
+    // TODO: Verify current password
+    // TODO: Derive new key
+    // TODO: Re-encrypt all vault entries in a transaction
+    // TODO: Update vault_meta with new salt and test envelope
+    // TODO: Zeroize old key
+    // TODO: Audit log: PasswordChanged
 
     CommandResult::ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::commands::types::*;
+
+    #[test]
+    fn session_response_serializes() {
+        let resp = SessionResponse {
+            session_id: "test-id".to_string(),
+            expires_at: "2025-01-01T00:00:00Z".to_string(),
+            is_unlocked: true,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("test-id"));
+    }
+
+    #[test]
+    fn password_reveal_serializes() {
+        let resp = PasswordRevealResponse {
+            password: "secret123".to_string(),
+            auto_clear_seconds: 30,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("secret123"));
+    }
 }

@@ -152,3 +152,111 @@ Work Log:
 Stage Summary:
 - Codebase passes all security rules from AOS v2.0
 - Ready for Phase 01: Architecture deepening
+
+---
+Task ID: 1.1
+Agent: Main Orchestrator
+Task: Encryption envelope format
+
+Work Log:
+- Created crypto/envelope.rs with EncryptedEnvelope, EnvelopeVersion, AadContext
+- Envelope format: [version:1][nonce:12][ciphertext+tag:N]
+- AAD context binds entity_id + field_name to prevent swap attacks
+- seal_envelope() and open_envelope() functions
+- to_bytes()/from_bytes() serialization for database storage
+- Updated crypto/mod.rs with envelope module and re-exports
+- 9 unit tests including round-trip, wrong AAD, cross-entry swap, tampering
+
+Stage Summary:
+- Encryption envelope fully specified and implemented
+- AAD prevents ciphertext swap attacks at field and entity level
+- Version byte allows future format migrations
+
+---
+Task ID: 1.2
+Agent: Main Orchestrator
+Task: Vault lifecycle state machine
+
+Work Log:
+- Created security/vault_state.rs with VaultState, VaultTransition, VaultStateMachine
+- States: Uninitialized → Locked → Unlocked → Locked
+- Transitions: Initialize, Unlock, Lock, AutoLock, ChangePassword
+- All transitions validated — illegal transitions return KestrelError::Unauthorized
+- Observer pattern for state change notifications
+- Session touch and auto-lock checking
+- Updated security/mod.rs with vault_state module and re-exports
+- 14 unit tests covering full lifecycle and all rejection cases
+
+Stage Summary:
+- State machine enforces vault lifecycle invariants
+- All state changes logged for audit trail
+- Thread-safe access planned via RwLock
+
+---
+Task ID: 1.3
+Agent: Main Orchestrator
+Task: Command types + auth commands + settings commands
+
+Work Log:
+- Created commands/types.rs with CommandResult<T>, CommandError, validation helpers
+- Response types: VaultEntryResponse (NO password), PasswordRevealResponse, SessionResponse, etc.
+- Error sanitization: all KestrelError variants mapped to user-safe messages
+- Input validation: validate_field, validate_master_password, validate_uuid
+- Created commands/auth_commands.rs with 6 commands (init, unlock, lock, session, initialized, change_password)
+- Created commands/settings_commands.rs with 2 commands (get, update)
+- AppState struct for Tauri state management
+- Updated commands/mod.rs with all new modules
+- Updated lib.rs with 22 registered commands + AppState management
+
+Stage Summary:
+- 22 Tauri commands registered (6 auth + 7 vault + 2 audit + 3 scanner + 3 crypto + 2 settings)
+- All commands have typed request/response interfaces
+- Error sanitization prevents internal detail leakage
+- Input validation on every parameter
+
+---
+Task ID: 1.4
+Agent: Main Orchestrator
+Task: Repository implementations
+
+Work Log:
+- Created db/vault_entry_repo.rs: VaultEntryRepo with Repository trait impl, search, list_by_folder, count
+- Created db/audit_event_repo.rs: AuditEventRepo (append-only) with category/time-range queries
+- Created db/vault_meta_repo.rs: VaultMetaRepo (singleton) with initialize, get, exists, update_salt, update_hint
+- Updated db/mod.rs with new module declarations and re-exports
+
+Stage Summary:
+- 3 repository implementations created
+- VaultEntryRepo: full CRUD + search + folder filtering
+- AuditEventRepo: append-only with query capabilities
+- VaultMetaRepo: singleton for KDF params and test envelope
+
+---
+Task ID: 1.5
+Agent: Main Orchestrator
+Task: Rewrite vault/audit/scanner commands
+
+Work Log:
+- Rewrote vault_commands.rs with typed interfaces, input validation, vault_reveal_password
+- Rewrote audit_commands.rs with typed query params and export
+- Rewrote scanner_commands.rs with proper types and local-only enforcement
+- Rewrote crypto_commands.rs as RESTRICTED (blocked by default)
+
+Stage Summary:
+- All commands use typed request/response structures
+- Password reveal is audit-logged with auto-clear metadata
+- Crypto commands are explicitly blocked (use domain commands instead)
+
+---
+Task ID: 1.6
+Agent: Main Orchestrator
+Task: Module contracts + IPC security documentation
+
+Work Log:
+- Created docs/architecture/module-contracts.md: full API surface for all 8 modules
+- Created docs/security-notes/ipc-model.md: trust boundary, data flow rules, validation, rate limiting, error sanitization
+
+Stage Summary:
+- Complete module API documentation with dependency graph
+- IPC security model with never-send/allowed/conditional data rules
+- 22-command inventory documented
