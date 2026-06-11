@@ -101,6 +101,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::crypto_commands::crypto_derive_key,
             commands::crypto_commands::crypto_encrypt_data,
             commands::crypto_commands::crypto_decrypt_data,
+            // Note commands
+            commands::note_commands::note_create,
+            commands::note_commands::note_list,
+            commands::note_commands::note_get,
+            commands::note_commands::note_update,
+            commands::note_commands::note_delete,
+            commands::note_commands::note_reveal,
             // Settings commands
             commands::settings_commands::settings_get,
             commands::settings_commands::settings_update,

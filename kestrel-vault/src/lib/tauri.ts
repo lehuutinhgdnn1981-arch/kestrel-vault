@@ -351,6 +351,56 @@ export interface SecureNoteRevealResult {
   auto_clear_seconds: number;
 }
 
+export const noteCommands = {
+  /** Create a new secure note. Requires Unlocked state. */
+  createNote: (
+    title: string,
+    content: string,
+    folderId?: string,
+    tags?: string[],
+  ): Promise<SecureNoteView> =>
+    safeInvoke("note_create", {
+      title,
+      content,
+      folderId: folderId ?? null,
+      tags: tags ?? [],
+    }),
+
+  /** List secure notes with decrypted titles. Requires Unlocked state. */
+  listNotes: (folderId?: string): Promise<SecureNoteView[]> =>
+    safeInvoke("note_list", { folderId: folderId ?? null }),
+
+  /** Get a single note by ID. Content NOT included. */
+  getNote: (id: string): Promise<SecureNoteView> =>
+    safeInvoke("note_get", { id }),
+
+  /** Update a secure note. Only provided fields are changed. */
+  updateNote: (
+    id: string,
+    updates: {
+      title?: string;
+      content?: string;
+      folderId?: string;
+      tags?: string[];
+    },
+  ): Promise<SecureNoteView> =>
+    safeInvoke("note_update", {
+      id,
+      title: updates.title,
+      content: updates.content,
+      folderId: updates.folderId,
+      tags: updates.tags,
+    }),
+
+  /** Delete a secure note. Requires confirmation. */
+  deleteNote: (id: string, confirm: boolean): Promise<void> =>
+    safeInvoke("note_delete", { id, confirm }),
+
+  /** Reveal decrypted note content. Audit-logged. Auto-clears after timeout. */
+  revealNote: (id: string): Promise<SecureNoteRevealResult> =>
+    safeInvoke("note_reveal", { id }),
+} as const;
+
 // ─── File Entries ──────────────────────────────────────────────────
 
 export interface FileEntryView {

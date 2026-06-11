@@ -15,6 +15,8 @@ import { create } from "zustand";
 import { authCommands, type SessionInfo, type VaultStatus } from "@/lib/tauri";
 import type { AppState, UnlockState, VaultLifecycleState } from "@/types/app";
 import { DEFAULT_SETTINGS, TIMEOUTS } from "@/lib/constants";
+import { useVaultStore } from "@/stores/vault-store";
+import { useNoteStore } from "@/stores/note-store";
 
 interface AuthState {
   /** Overall app state */
@@ -212,5 +214,8 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       lastActivity: 0,
       error: null,
     });
+    // Clear vault and note stores on lock to prevent data leakage
+    useVaultStore.getState().clearState();
+    useNoteStore.getState().clearState();
   },
 }));

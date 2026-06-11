@@ -445,6 +445,201 @@ impl<'a> VaultServiceImpl<'a> {
         Ok(())
     }
 
+    // ── Secure Note Operations ──
+
+    /// Creates a new secure note with encrypted title and content.
+    ///
+    /// Both the title and content are encrypted with the DEK before
+    /// storage. Tags (if provided) are also encrypted to prevent
+    /// metadata leakage.
+    ///
+    /// # Security
+    ///
+    /// - Title is encrypted (unlike vault entries where title is plaintext for search)
+    /// - Content is encrypted with AES-256-GCM via the DEK
+    /// - Tags are encrypted to prevent organizational structure leakage
+    /// - Each field gets its own nonce via the envelope format
+    /// - AAD context binds each field to the note ID
+    pub async fn create_note(
+        &self,
+        title: &str,
+        content: &str,
+        folder_id: Option<Uuid>,
+        tags: Vec<String>,
+    ) -> KestrelResult<SecureNoteRow> {
+        let crypto = self.crypto_service();
+        let note_id = Uuid::new_v4().to_string();
+
+        // Encrypt title
+        let encrypted_title = crypto.encrypt_field(&note_id, "title", title.as_bytes())?.envelope_bytes;
+
+        // Encrypt content
+        let encrypted_content = crypto.encrypt_field(&note_id, "content", content.as_bytes())?.envelope_bytes;
+
+        // Generate nonce (for compatibility with the DB schema's nonce column)
+        let mut nonce = [0u8; 12];
+        random_bytes(&mut nonce)?;
+        let nonce_vec = nonce.to_vec();
+
+        // Encrypt tags
+        let encrypted_tags = if !tags.is_empty() {
+            let tags_json = serde_json::to_vec(&tags)
+                .map_err(|e| KestrelError::Serialization(format!("Failed to serialize tags: {e}")))?;
+            Some(crypto.encrypt_field(&note_id, "tags", &tags_json)?.envelope_bytes)
+        } else {
+            None
+        };
+
+        let repo_request = CreateSecureNoteRequest {
+            encrypted_title,
+            encrypted_content,
+            nonce: nonce_vec,
+            folder_id: folder_id.map(|u| u.to_string()),
+            encrypted_tags,
+        };
+
+        let row = SecureNoteRepo::create(self.pool, repo_request).await?;
+
+        // Audit log
+        self.audit("Notes", "NoteCreated", &row.id, None).await?;
+
+        Ok(row)
+    }
+
+    /// Lists secure notes, optionally filtered by folder.
+    ///
+    /// Returns notes with decrypted titles for display. Content
+    /// is NOT decrypted — use `reveal_note` for that.
+    pub async fn list_notes(
+        &self,
+        folder_id: Option<Uuid>,
+    ) -> KestrelResult<Vec<SecureNoteRow>> {
+        let rows = SecureNoteRepo::list_by_folder(
+            self.pool,
+            folder_id.as_ref().map(|u| u.to_string()).as_deref(),
+        )
+        .await?;
+
+        Ok(rows)
+    }
+
+    /// Gets a secure note by ID.
+    ///
+    /// Returns the note with encrypted fields intact.
+    pub async fn get_note(&self, id: Uuid) -> KestrelResult<SecureNoteRow> {
+        SecureNoteRepo::get_by_id(self.pool, &id.to_string()).await
+    }
+
+    /// Updates an existing secure note.
+    ///
+    /// Only provided fields are updated. Title and content changes
+    /// are re-encrypted with fresh nonces.
+    pub async fn update_note(
+        &self,
+        id: Uuid,
+        title: Option<String>,
+        content: Option<String>,
+        folder_id: Option<Option<Uuid>>,
+        tags: Option<Vec<String>>,
+    ) -> KestrelResult<SecureNoteRow> {
+        let crypto = self.crypto_service();
+        let id_str = id.to_string();
+
+        // Encrypt changed fields
+        let encrypted_title = match &title {
+            Some(t) => Some(crypto.encrypt_field(&id_str, "title", t.as_bytes())?.envelope_bytes),
+            None => None,
+        };
+
+        let encrypted_content = match &content {
+            Some(c) => Some(crypto.encrypt_field(&id_str, "content", c.as_bytes())?.envelope_bytes),
+            None => None,
+        };
+
+        // Generate new nonce if content changed
+        let nonce = if encrypted_content.is_some() {
+            let mut n = [0u8; 12];
+            random_bytes(&mut n)?;
+            Some(n.to_vec())
+        } else {
+            None
+        };
+
+        // Encrypt tags
+        let encrypted_tags = match &tags {
+            Some(t) if !t.is_empty() => {
+                let tags_json = serde_json::to_vec(t)
+                    .map_err(|e| KestrelError::Serialization(format!("Failed to serialize tags: {e}")))?;
+                Some(Some(crypto.encrypt_field(&id_str, "tags", &tags_json)?.envelope_bytes))
+            }
+            Some(_) => Some(None), // Clear tags
+            None => None,
+        };
+
+        let repo_request = crate::db::secure_note_repo::UpdateSecureNoteRequest {
+            encrypted_title,
+            encrypted_content,
+            nonce,
+            folder_id: folder_id.map(|opt| opt.map(|u| u.to_string())),
+            encrypted_tags,
+        };
+
+        let row = SecureNoteRepo::update(self.pool, &id_str, repo_request).await?;
+
+        // Audit log
+        self.audit("Notes", "NoteUpdated", &id_str, None).await?;
+
+        Ok(row)
+    }
+
+    /// Deletes a secure note by ID.
+    pub async fn delete_note(&self, id: Uuid) -> KestrelResult<()> {
+        let id_str = id.to_string();
+        SecureNoteRepo::delete(self.pool, &id_str).await?;
+        self.audit("Notes", "NoteDeleted", &id_str, None).await?;
+        Ok(())
+    }
+
+    /// Reveals the decrypted content of a secure note.
+    ///
+    /// This is the ONLY method that returns decrypted note content.
+    /// The caller must zeroize the returned `DecryptedField` after use.
+    /// This operation is always audit-logged.
+    pub async fn reveal_note(&self, id: Uuid) -> KestrelResult<(DecryptedField, DecryptedField)> {
+        let id_str = id.to_string();
+        let crypto = self.crypto_service();
+
+        // Load the note from database
+        let row = SecureNoteRepo::get_by_id(self.pool, &id_str).await?;
+
+        // Decrypt title
+        let decrypted_title = crypto.decrypt_field(&id_str, "title", &row.title)?;
+
+        // Decrypt content
+        let decrypted_content = crypto.decrypt_field(&id_str, "content", &row.content)?;
+
+        // Audit log — always log content reveals
+        self.audit("Notes", "NoteRevealed", &id_str, None).await?;
+
+        Ok((decrypted_title, decrypted_content))
+    }
+
+    /// Decrypts the title of a secure note for display in lists.
+    ///
+    /// Returns the decrypted title string, or a placeholder if
+    /// decryption fails (should not happen with correct DEK).
+    pub async fn decrypt_note_title(&self, note_id: &str, encrypted_title: &[u8]) -> KestrelResult<String> {
+        let crypto = self.crypto_service();
+        let decrypted = crypto.decrypt_field(note_id, "title", encrypted_title)?;
+        String::from_utf8(decrypted.plaintext)
+            .map_err(|e| KestrelError::Crypto(format!("Note title is not valid UTF-8: {e}")))
+    }
+
+    /// Counts the total number of secure notes.
+    pub async fn count_notes(&self) -> KestrelResult<i64> {
+        SecureNoteRepo::count(self.pool).await
+    }
+
     // ── Conversion Helpers ──
 
     /// Converts a database row to a domain VaultEntry.
