@@ -38,6 +38,7 @@ use crate::crypto::keywrap::{DataEncryptionKey, WrappedDek};
 use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
+use crate::db::DbConnection;
 use crate::error::KestrelError;
 use crate::security::lockout::{FailedAttemptTracker, LockoutState};
 use crate::security::rate_limit::{Operation, RateLimiter};
@@ -72,6 +73,11 @@ pub struct AppState {
     pub rate_limiter: RwLock<RateLimiter>,
     /// Failed attempt tracker for progressive lockout.
     pub lockout_tracker: RwLock<FailedAttemptTracker>,
+    /// The encrypted database connection (SQLCipher).
+    /// Only available after vault initialization or unlock.
+    /// None when the vault is uninitialized or the database
+    /// hasn't been opened yet.
+    pub db: RwLock<Option<DbConnection>>,
     /// The master key (KEK), present only when vault is unlocked.
     /// When the vault is locked, this is `None` and the key
     /// memory has been zeroized via `ZeroizeOnDrop`.
@@ -107,6 +113,7 @@ impl Default for AppState {
             vault_state_machine: RwLock::new(VaultStateMachine::new()),
             rate_limiter: RwLock::new(RateLimiter::new()),
             lockout_tracker: RwLock::new(FailedAttemptTracker::new()),
+            db: RwLock::new(None),
             master_key: RwLock::new(None),
             dek: RwLock::new(None),
             salt_hex: RwLock::new(None),
@@ -216,6 +223,19 @@ impl AppState {
     pub fn get_dek(&self) -> Option<DataEncryptionKey> {
         let guard = self.dek.read().unwrap_or_else(|e| {
             tracing::error!("DEK lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone()
+    }
+
+    /// Returns a reference-counted clone of the database connection
+    /// if the database has been opened.
+    ///
+    /// Returns `None` if the database hasn't been initialized yet.
+    /// This is used by vault commands that need database access.
+    pub fn get_db(&self) -> Option<DbConnection> {
+        let guard = self.db.read().unwrap_or_else(|e| {
+            tracing::error!("DB lock poisoned: {}", e);
             std::process::exit(1);
         });
         guard.clone()
@@ -1066,41 +1086,58 @@ pub fn auth_change_password(
         ));
     }
 
-    // ── Derive new key from new password ──
-    let (new_master_key, new_salt, new_test_envelope) = {
-        let secure_new = SecureString::from(new_password);
-        let result = initialize_vault_crypto(secure_new.as_bytes());
-        // secure_new is zeroized when it goes out of scope
-        match result {
-            Ok(r) => r,
-            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-        }
+    // ── KEK/DEK key rotation using rotate_master_key ──
+    // With the KEK/DEK hierarchy, password change is O(1):
+    // 1. Get the current KEK (master key) and wrapped DEK
+    // 2. Rotate: derive new KEK from new password, re-wrap DEK
+    // 3. No vault data needs to be re-encrypted
+    let old_master_key = state.get_master_key().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — master key not available")
+    })?;
+    let old_wrapped_dek = {
+        let guard = state.wrapped_dek.read().unwrap_or_else(|e| {
+            tracing::error!("Wrapped DEK lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone().ok_or_else(|| {
+            CommandError::unauthorized("Wrapped DEK not available")
+        })?
     };
 
-    let new_salt_hex: String = new_salt.0.iter().map(|b| format!("{b:02x}")).collect();
+    let secure_new = SecureString::from(new_password);
+    let (rotation_pair, rotation_result) = rotate_master_key(
+        old_master_key,
+        &old_wrapped_dek,
+        &secure_new,
+    )
+    .map_err(CommandError::from_kestrel)?;
+    // secure_new is zeroized when it goes out of scope
 
-    // ── Re-encrypt all vault entries with the new key ──
-    // TODO: Implement transactional re-encryption with database
-    // 1. Load all vault entries from database
-    // 2. Decrypt each sensitive field with old key
-    // 3. Re-encrypt each field with new key
-    // 4. Update all entries in a transaction
-    // 5. If any step fails, rollback
+    let new_salt_hex: String = rotation_result.new_salt.0.iter().map(|b| format!("{b:02x}")).collect();
 
-    // For now, we just update the master key and metadata:
+    // ── Update in-memory vault metadata ──
+    state.store_vault_meta_in_memory(
+        new_salt_hex,
+        rotation_result.new_test_envelope,
+        rotation_result.new_wrapped_dek,
+        KdfParams::current(), // Use current params (may upgrade if old params were outdated)
+    );
+
+    // ── Update master key (KEK) in AppState ──
     {
         let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
             tracing::error!("Master key lock poisoned: {}", e);
             std::process::exit(1);
         });
-        // Old key is dropped → zeroized via ZeroizeOnDrop
-        *key_guard = Some(new_master_key);
+        *key_guard = Some(rotation_pair.new_key);
     }
 
-    // Update vault metadata in memory
-    state.store_vault_meta_in_memory(new_salt_hex, new_test_envelope.clone());
+    // ── Update DEK in AppState ──
+    // The DEK itself hasn't changed — only its wrapping has.
+    // The DEK is still the same key, so we don't need to update it.
+    // (It was never re-derived, only re-wrapped.)
 
-    // Create a new session after key rotation
+    // ── Create new session after rotation ──
     let auto_lock_minutes = {
         let config = state.config.read().unwrap_or_else(|e| {
             tracing::error!("Config lock poisoned: {}", e);
@@ -1108,25 +1145,20 @@ pub fn auth_change_password(
         });
         config.auto_lock_minutes
     };
-
+    let new_session = Session::new(auto_lock_minutes)
+        .map_err(CommandError::from_kestrel)?;
     {
         let mut session_guard = state.session.write().unwrap_or_else(|e| {
             tracing::error!("Session lock poisoned: {}", e);
             std::process::exit(1);
         });
-        match Session::new(auto_lock_minutes) {
-            Ok(new_session) => *session_guard = Some(new_session),
-            Err(e) => {
-                tracing::error!("Failed to create session after key rotation: {}", e);
-            }
-        }
+        *session_guard = Some(new_session);
     }
 
-    // TODO: Persist updated vault_meta to database
-    // TODO: Re-encrypt all vault entries with new key
-    // TODO: Audit log: PasswordChanged
+    // TODO: Persist updated vault_meta to database via VaultMetaRepo
+    // TODO: Audit log: PasswordChanged { kdf_upgraded: <bool> }
 
-    tracing::info!("Master password changed — key rotated, new session created");
+    tracing::info!("Master password changed — KEK/DEK rotation complete (O(1), no data re-encrypted)");
 
     CommandResult::ok(())
 }

@@ -16,35 +16,47 @@
 //!
 //! ## vault_meta (singleton row)
 //!
-//! Stores KDF parameters and the test envelope for vault verification.
-//! Only one row exists (id = 1). The salt is hex-encoded for
-//! SQLCipher compatibility.
+//! Stores KDF parameters, the test envelope, and the wrapped DEK for
+//! vault verification. Only one row exists (id = 1). The salt is
+//! hex-encoded for SQLCipher compatibility. The wrapped_dek column
+//! stores the DEK encrypted by the KEK (Argon2id-derived master key).
 //!
 //! ## vault_entries
 //!
 //! Stores encrypted vault entries. Sensitive fields (password, notes,
-//! TOTP secret) are stored as encrypted BLOBs (envelope format).
+//! TOTP secret, URL, tags) are stored as encrypted BLOBs in envelope
+//! format. Each field has its own nonce embedded in the envelope.
 //! Non-sensitive metadata (title, username) is stored as plaintext
-//! for search indexing. A per-entry nonce is NOT used — each field
-//! has its own nonce embedded in the envelope.
+//! for search indexing.
 //!
 //! ## folders
 //!
 //! Hierarchical folder structure for organizing vault entries.
 //! Folder names are stored as plaintext (not sensitive).
 //!
+//! ## secure_notes
+//!
+//! Stores encrypted secure notes. Both title and content are stored
+//! as encrypted BLOBs. Only the folder relationship is plaintext.
+//!
+//! ## file_entries
+//!
+//! Stores metadata about encrypted file attachments. Filenames, paths,
+//! and MIME types are all encrypted BLOBs. Actual file content is
+//! stored encrypted on disk.
+//!
 //! ## audit_events
 //!
 //! Append-only audit log for security events. Events are never
 //! deleted or modified. Includes category, action, subject,
-//! and optional details.
+//! and optional metadata_json.
 
 use crate::error::KestrelError;
 use sqlx::SqlitePool;
 
 /// The current expected schema version.
 /// Increment this when adding new migrations.
-const CURRENT_SCHEMA_VERSION: u32 = 5;
+const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 /// SQL to create the schema version tracking table.
 const CREATE_VERSION_TABLE: &str = r#"
@@ -56,7 +68,7 @@ const CREATE_VERSION_TABLE: &str = r#"
     );
 "#;
 
-/// Migration 2: Create vault_meta table.
+/// Migration 2: Create vault_meta table with KEK/DEK support.
 const CREATE_VAULT_META: &str = r#"
     CREATE TABLE IF NOT EXISTS vault_meta (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -64,7 +76,9 @@ const CREATE_VAULT_META: &str = r#"
         iterations INTEGER NOT NULL,
         memory_cost INTEGER NOT NULL,
         parallelism INTEGER NOT NULL,
+        kdf_version INTEGER NOT NULL DEFAULT 1,
         test_envelope BLOB NOT NULL,
+        wrapped_dek BLOB NOT NULL,
         hint TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -72,17 +86,21 @@ const CREATE_VAULT_META: &str = r#"
 "#;
 
 /// Migration 3: Create vault_entries table.
+///
+/// Sensitive fields are stored as encrypted envelope BLOBs.
+/// Each BLOB contains: [version:1][nonce:12][ciphertext:N][tag:16]
+/// Non-sensitive fields (title, username) are plaintext for search.
 const CREATE_VAULT_ENTRIES: &str = r#"
     CREATE TABLE IF NOT EXISTS vault_entries (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         username TEXT NOT NULL,
         encrypted_password BLOB NOT NULL,
-        url TEXT,
+        encrypted_url BLOB NOT NULL DEFAULT X'',
         encrypted_notes BLOB NOT NULL DEFAULT X'',
-        totp_secret BLOB,
+        encrypted_totp_secret BLOB,
+        encrypted_tags BLOB NOT NULL DEFAULT X'',
         folder_id TEXT,
-        tags TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -109,7 +127,7 @@ const CREATE_AUDIT_EVENTS: &str = r#"
         category TEXT NOT NULL,
         action TEXT NOT NULL,
         subject TEXT NOT NULL,
-        details TEXT,
+        metadata_json TEXT,
         timestamp TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_audit_events_category ON audit_events(category);
@@ -117,10 +135,39 @@ const CREATE_AUDIT_EVENTS: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(action);
 "#;
 
-/// Additional indexes for vault_entries.
-const CREATE_VAULT_ENTRIES_INDEXES: &str = r#"
+/// Migration 6: Create secure_notes table.
+const CREATE_SECURE_NOTES: &str = r#"
+    CREATE TABLE IF NOT EXISTS secure_notes (
+        id TEXT PRIMARY KEY,
+        title BLOB NOT NULL,
+        content BLOB NOT NULL,
+        folder_id TEXT,
+        tags BLOB,
+        nonce BLOB NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
+    );
+"#;
+
+/// Migration 7: Create file_entries table + vault_entries indexes.
+const CREATE_FILE_ENTRIES_AND_INDEXES: &str = r#"
+    CREATE TABLE IF NOT EXISTS file_entries (
+        id TEXT PRIMARY KEY,
+        filename BLOB NOT NULL,
+        encrypted_path BLOB NOT NULL,
+        file_size BLOB NOT NULL,
+        mime_type BLOB,
+        folder_id TEXT,
+        nonce BLOB NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_vault_entries_folder ON vault_entries(folder_id);
     CREATE INDEX IF NOT EXISTS idx_vault_entries_updated ON vault_entries(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_secure_notes_folder ON secure_notes(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_file_entries_folder ON file_entries(folder_id);
 "#;
 
 /// A single migration definition.
@@ -151,13 +198,13 @@ pub fn get_migrations() -> Vec<Migration> {
         Migration {
             version: 2,
             name: "create_vault_meta_table",
-            checksum: "sha256:e5f6g7h8_vault_meta",
+            checksum: "sha256:e5f6g7h8_vault_meta_v2",
             sql: CREATE_VAULT_META,
         },
         Migration {
             version: 3,
             name: "create_vault_entries_table",
-            checksum: "sha256:i9j0k1l2_vault_entries",
+            checksum: "sha256:i9j0k1l2_vault_entries_v2",
             sql: CREATE_VAULT_ENTRIES,
         },
         Migration {
@@ -168,13 +215,21 @@ pub fn get_migrations() -> Vec<Migration> {
         },
         Migration {
             version: 5,
-            name: "create_audit_events_and_indexes",
-            checksum: "sha256:q7r8s9t0_audit_events",
-            sql: &format!(
-                "{}\n{}",
-                CREATE_AUDIT_EVENTS,
-                CREATE_VAULT_ENTRIES_INDEXES
-            ),
+            name: "create_audit_events_table",
+            checksum: "sha256:q7r8s9t0_audit_events_v2",
+            sql: CREATE_AUDIT_EVENTS,
+        },
+        Migration {
+            version: 6,
+            name: "create_secure_notes_table",
+            checksum: "sha256:u1v2w3x4_secure_notes",
+            sql: CREATE_SECURE_NOTES,
+        },
+        Migration {
+            version: 7,
+            name: "create_file_entries_and_indexes",
+            checksum: "sha256:y5z6a7b8_file_entries",
+            sql: CREATE_FILE_ENTRIES_AND_INDEXES,
         },
     ]
 }
@@ -375,5 +430,37 @@ mod tests {
                 migration.name
             );
         }
+    }
+
+    #[test]
+    fn vault_meta_includes_wrapped_dek() {
+        assert!(
+            CREATE_VAULT_META.contains("wrapped_dek"),
+            "vault_meta must include wrapped_dek column for KEK/DEK hierarchy"
+        );
+    }
+
+    #[test]
+    fn vault_meta_includes_kdf_version() {
+        assert!(
+            CREATE_VAULT_META.contains("kdf_version"),
+            "vault_meta must include kdf_version for parameter versioning"
+        );
+    }
+
+    #[test]
+    fn vault_entries_has_encrypted_fields() {
+        assert!(
+            CREATE_VAULT_ENTRIES.contains("encrypted_url"),
+            "vault_entries must have encrypted_url"
+        );
+        assert!(
+            CREATE_VAULT_ENTRIES.contains("encrypted_tags"),
+            "vault_entries must have encrypted_tags"
+        );
+        assert!(
+            CREATE_VAULT_ENTRIES.contains("encrypted_totp_secret"),
+            "vault_entries must have encrypted_totp_secret"
+        );
     }
 }

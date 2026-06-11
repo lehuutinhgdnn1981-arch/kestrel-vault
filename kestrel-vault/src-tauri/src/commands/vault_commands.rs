@@ -9,9 +9,17 @@
 //! - Vault must be unlocked for all operations
 //! - Auto-lock is checked before every operation
 //! - Passwords are ONLY returned via `vault_reveal_password`
+//! - All field encryption uses the DEK (not KEK)
 //! - All modifications are audit-logged
 //! - All inputs are validated
 //! - Password strings use SecureString for zeroization
+//!
+//! # KEK/DEK Hierarchy in Vault Commands
+//!
+//! The vault commands use the DEK for field-level encryption:
+//! - `VaultCryptoService::new_dek(&dek)` for encrypt/decrypt operations
+//! - The KEK is only used for test envelope verification and DEK wrapping
+//! - Sub-keys derived from the DEK via HKDF are used for specific purposes
 //!
 //! # IPC Contract
 //!
@@ -30,10 +38,9 @@ use crate::commands::types::{
     PasswordRevealResponse, VaultEntryResponse,
     MAX_NOTES_LEN, MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
 };
+use crate::crypto::keywrap::DataEncryptionKey;
 use crate::crypto::secure_string::SecureString;
-use crate::crypto::vault_crypto::VaultCryptoService;
-#[allow(unused_imports)]
-use crate::crypto::vault_crypto::field_names;
+use crate::crypto::vault_crypto::{VaultCryptoService, field_names};
 use crate::security::vault_state::VaultState;
 use tauri::State;
 use zeroize::Zeroize;
@@ -46,7 +53,7 @@ const DEFAULT_AUTO_CLEAR_SECONDS: u32 = 30;
 
 /// Creates a new vault entry.
 ///
-/// The plaintext password is encrypted in Rust before storage.
+/// The plaintext password is encrypted with the DEK before storage.
 /// The response does NOT include the password.
 ///
 /// # IPC Contract
@@ -58,6 +65,7 @@ const DEFAULT_AUTO_CLEAR_SECONDS: u32 = 30;
 ///
 /// - Auto-lock is checked before the operation
 /// - Password is converted to SecureString for zeroization
+/// - Field encryption uses the DEK (via VaultCryptoService::new_dek)
 /// - Activity is recorded to extend the session
 ///
 /// # Errors
@@ -105,18 +113,18 @@ pub fn vault_create_entry(
         validate_field(tag, 64, "Tag")?;
     }
 
-    // ── Get master key for encryption ──
-    let master_key = state.get_master_key().ok_or_else(|| {
-        CommandError::unauthorized("Vault is locked — master key not available")
+    // ── Get DEK for field-level encryption ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
+    let crypto_service = VaultCryptoService::new_dek(&dek);
 
     let entry_id = uuid::Uuid::new_v4().to_string();
-    let crypto_service = VaultCryptoService::new(&master_key);
 
-    // ── Encrypt sensitive fields using SecureString ──
+    // ── Encrypt sensitive fields using DEK via SecureString ──
     let encrypted_password = {
         let secure_password = SecureString::from(password);
-        let result = crypto_service.encrypt_password(&entry_id, secure_password.as_bytes());
+        let result = crypto_service.encrypt_field(&entry_id, field_names::PASSWORD, secure_password.as_bytes());
         // secure_password is zeroized when it goes out of scope
         match result {
             Ok(enc) => enc.envelope_bytes,
@@ -124,23 +132,45 @@ pub fn vault_create_entry(
         }
     };
 
-    let encrypted_notes = match &notes {
-        Some(n) if !n.is_empty() => {
-            match crypto_service.encrypt_notes(&entry_id, n.as_bytes()) {
-                Ok(enc) => Some(enc.envelope_bytes),
+    let encrypted_url = match &url {
+        Some(u) if !u.is_empty() => {
+            match crypto_service.encrypt_field(&entry_id, field_names::URL, u.as_bytes()) {
+                Ok(enc) => enc.envelope_bytes,
                 Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
             }
         }
-        _ => None,
+        _ => Vec::new(),
+    };
+
+    let encrypted_notes = match &notes {
+        Some(n) if !n.is_empty() => {
+            match crypto_service.encrypt_field(&entry_id, field_names::NOTES, n.as_bytes()) {
+                Ok(enc) => enc.envelope_bytes,
+                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+            }
+        }
+        _ => Vec::new(),
+    };
+
+    let encrypted_tags = if !tags.is_empty() {
+        match serde_json::to_vec(&tags) {
+            Ok(tags_bytes) => {
+                match crypto_service.encrypt_field(&entry_id, field_names::TAGS, &tags_bytes) {
+                    Ok(enc) => enc.envelope_bytes,
+                    Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+                }
+            }
+            Err(_) => Vec::new(),
+        }
+    } else {
+        Vec::new()
     };
 
     // ── Persist to database ──
     // TODO: Insert into database via VaultEntryRepo
-    // The encrypted_password and encrypted_notes envelope bytes are
-    // ready for storage as BLOBs.
+    // The encrypted_* envelope bytes are ready for storage as BLOBs.
     // Also store: id, title (plaintext for search), username (plaintext
-    // for search), url (encrypted for privacy), folder_id, tags (encrypted
-    // for privacy), created_at, updated_at
+    // for search), folder_id, created_at, updated_at
 
     // ── Record activity (extends auto-lock timer) ──
     {
@@ -220,7 +250,7 @@ pub fn vault_get_entry(
 /// Updates an existing vault entry.
 ///
 /// Only provided fields are updated. If a new password is
-/// provided, it is encrypted before storage.
+/// provided, it is encrypted with the DEK before storage.
 ///
 /// # IPC Contract
 ///
@@ -231,6 +261,7 @@ pub fn vault_get_entry(
 ///
 /// - Auto-lock is checked before the operation
 /// - Password is converted to SecureString for zeroization
+/// - Field encryption uses the DEK
 /// - Activity is recorded to extend the session
 ///
 /// # Errors
@@ -276,16 +307,16 @@ pub fn vault_update_entry(
         validate_field(n, MAX_NOTES_LEN, "Notes")?;
     }
 
-    // ── Get master key for re-encryption ──
-    let master_key = state.get_master_key().ok_or_else(|| {
-        CommandError::unauthorized("Vault is locked — master key not available")
+    // ── Get DEK for re-encryption ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let crypto_service = VaultCryptoService::new(&master_key);
+    let crypto_service = VaultCryptoService::new_dek(&dek);
 
-    // ── Re-encrypt changed sensitive fields using SecureString ──
+    // ── Re-encrypt changed sensitive fields using DEK ──
     if let Some(ref new_password) = password {
         let secure_password = SecureString::from(new_password.clone());
-        let encrypted = crypto_service.encrypt_password(&id, secure_password.as_bytes());
+        let encrypted = crypto_service.encrypt_field(&id, field_names::PASSWORD, secure_password.as_bytes());
         // secure_password is zeroized when it goes out of scope
         match encrypted {
             Ok(enc) => {
@@ -296,15 +327,25 @@ pub fn vault_update_entry(
         }
     }
 
-    if let Some(ref new_notes) = notes {
-        if !new_notes.is_empty() {
-            match crypto_service.encrypt_notes(&id, new_notes.as_bytes()) {
+    if let Some(ref new_url) = url {
+        if !new_url.is_empty() {
+            match crypto_service.encrypt_field(&id, field_names::URL, new_url.as_bytes()) {
                 Ok(enc) => {
-                    // TODO: Update encrypted_notes in database with enc.envelope_bytes
+                    // TODO: Update encrypted_url in database with enc.envelope_bytes
                     let _ = enc;
                 }
                 Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
             }
+        }
+    }
+
+    if let Some(ref new_notes) = notes {
+        match crypto_service.encrypt_field(&id, field_names::NOTES, new_notes.as_bytes()) {
+            Ok(enc) => {
+                // TODO: Update encrypted_notes in database with enc.envelope_bytes
+                let _ = enc;
+            }
+            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
         }
     }
 
@@ -492,8 +533,7 @@ pub fn vault_search_entries(
 /// - Audit-logged (who revealed what and when)
 /// - Auto-clear metadata included in response
 /// - Should only be called on explicit user action
-/// - Decrypted password is returned as a string that the frontend
-///   must clear after the auto-clear timeout
+/// - Decryption uses the DEK (not KEK)
 ///
 /// # Errors
 ///
@@ -511,11 +551,11 @@ pub fn vault_reveal_password(
 
     validate_uuid(&id, "id")?;
 
-    // ── Get master key for decryption ──
-    let master_key = state.get_master_key().ok_or_else(|| {
-        CommandError::unauthorized("Vault is locked — master key not available")
+    // ── Get DEK for decryption ──
+    let dek = state.get_dek().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let crypto_service = VaultCryptoService::new(&master_key);
+    let crypto_service = VaultCryptoService::new_dek(&dek);
 
     // ── Record activity ──
     {
@@ -527,16 +567,16 @@ pub fn vault_reveal_password(
     }
 
     // TODO: Load encrypted password envelope bytes from database via VaultEntryRepo
-    // The decryption flow:
+    // The decryption flow using the DEK:
     //
     // 1. Load encrypted_password BLOB from database for the given entry_id
-    // 2. Decrypt using crypto_service.decrypt_password(&id, &envelope_bytes)
+    // 2. Decrypt using crypto_service.decrypt_field(&id, "password", &envelope_bytes)
     // 3. Convert decrypted bytes to String
     // 4. Return with auto-clear metadata
     // 5. Audit log: PasswordRevealed { entry_id }
     //
     // let encrypted_bytes = VaultEntryRepo::get_encrypted_password(pool, &id).await?;
-    // let decrypted = crypto_service.decrypt_password(&id, &encrypted_bytes)?;
+    // let decrypted = crypto_service.decrypt_field(&id, field_names::PASSWORD, &encrypted_bytes)?;
     // let password_string = String::from_utf8(decrypted.plaintext)
     //     .map_err(|_| KestrelError::Crypto("Password is not valid UTF-8".to_string()))?;
 

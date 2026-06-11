@@ -37,5 +37,5 @@ pub use audit_event_repo::{AuditEventRepo, AuditEventRow, CreateAuditEventReques
 pub use file_entry_repo::{FileEntryRepo, FileEntryRow, CreateFileEntryRequest};
 pub use folder_repo::{FolderRepo, FolderRow, CreateFolderRequest as CreateFolderRepoRequest};
 pub use secure_note_repo::{SecureNoteRepo, SecureNoteRow, CreateSecureNoteRequest};
-pub use vault_entry_repo::VaultEntryRepo;
+pub use vault_entry_repo::{VaultEntryRepo, VaultEntryRow, CreateVaultEntryRequest, UpdateVaultEntryRequest};
 pub use vault_meta_repo::{VaultMeta, VaultMetaRepo};

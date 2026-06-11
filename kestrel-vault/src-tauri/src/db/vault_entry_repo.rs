@@ -1,148 +1,243 @@
 //! Vault entry repository for database operations.
 //!
 //! Provides typed CRUD operations for the `vault_entries` table.
-//! All sensitive fields are stored as encrypted BLOBs — this
-//! repository does NOT perform encryption/decryption. That
-//! responsibility belongs to the vault service layer.
+//! All sensitive fields are stored as encrypted BLOBs in envelope
+//! format — this repository does NOT perform encryption/decryption.
+//! That responsibility belongs to the vault service layer.
 //!
-//! # SQL Schema
+//! # Field Encryption Strategy
 //!
-//! ```sql
-//! vault_entries (
-//!   id TEXT PRIMARY KEY,
-//!   title BLOB,           -- encrypted
-//!   username BLOB,        -- encrypted
-//!   encrypted_password BLOB,
-//!   url BLOB,             -- encrypted, nullable
-//!   notes BLOB,           -- encrypted, nullable
-//!   totp_secret BLOB,     -- encrypted, nullable
-//!   folder_id TEXT,       -- nullable
-//!   tags BLOB,            -- encrypted, nullable
-//!   nonce BLOB,           -- per-entry nonce
-//!   created_at TEXT,
-//!   updated_at TEXT,
-//!   accessed_at TEXT
-//! )
-//! ```
+//! | Field                | Storage     | Rationale                              |
+//! |----------------------|-------------|----------------------------------------|
+//! | id                   | TEXT (UUID) | Primary key, not sensitive             |
+//! | title                | TEXT        | Plaintext for search indexing          |
+//! | username             | TEXT        | Plaintext for search indexing          |
+//! | encrypted_password   | BLOB        | Envelope format — most sensitive       |
+//! | encrypted_url        | BLOB        | Envelope format — privacy              |
+//! | encrypted_notes      | BLOB        | Envelope format — may contain secrets  |
+//! | encrypted_totp_secret| BLOB        | Envelope format — 2FA secret           |
+//! | encrypted_tags       | BLOB        | Envelope format — metadata privacy     |
+//! | folder_id            | TEXT        | Plaintext — not sensitive              |
+//!
+//! # Envelope Format
+//!
+//! Each encrypted BLOB contains: [version:1][nonce:12][ciphertext:N][tag:16]
+//! The AAD context for each field is: `{entry_id}:{field_name}`
 
-use crate::db::repository::Repository;
 use crate::error::{KestrelError, KestrelResult};
-use crate::vault::entry::{CreateEntryRequest, UpdateEntryRequest, VaultEntry};
-use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-/// Vault entry repository implementing the Repository trait.
+/// A vault entry row from the database.
+///
+/// Encrypted fields are returned as raw envelope bytes.
+/// Decryption is handled by the service layer using the DEK.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VaultEntryRow {
+    /// Unique identifier (UUID v4).
+    pub id: String,
+    /// Plaintext title (for search indexing).
+    pub title: String,
+    /// Plaintext username (for search indexing).
+    pub username: String,
+    /// Encrypted password envelope bytes.
+    pub encrypted_password: Vec<u8>,
+    /// Encrypted URL envelope bytes.
+    pub encrypted_url: Vec<u8>,
+    /// Encrypted notes envelope bytes.
+    pub encrypted_notes: Vec<u8>,
+    /// Encrypted TOTP secret envelope bytes (nullable).
+    pub encrypted_totp_secret: Option<Vec<u8>>,
+    /// Encrypted tags envelope bytes.
+    pub encrypted_tags: Vec<u8>,
+    /// Folder ID (nullable).
+    pub folder_id: Option<String>,
+    /// When this entry was created.
+    pub created_at: String,
+    /// When this entry was last modified.
+    pub updated_at: String,
+    /// When this entry was last accessed.
+    pub accessed_at: String,
+}
+
+/// Request to create a new vault entry.
+///
+/// All encrypted fields must be set by the service layer
+/// (using the DEK and envelope encryption) before calling
+/// the repository. Plaintext fields (title, username) are
+/// passed directly for search indexing.
+#[derive(Debug, Clone)]
+pub struct CreateVaultEntryRequest {
+    /// Plaintext title (for search).
+    pub title: String,
+    /// Plaintext username (for search).
+    pub username: String,
+    /// Encrypted password envelope bytes.
+    pub encrypted_password: Vec<u8>,
+    /// Encrypted URL envelope bytes (empty if no URL).
+    pub encrypted_url: Vec<u8>,
+    /// Encrypted notes envelope bytes (empty if no notes).
+    pub encrypted_notes: Vec<u8>,
+    /// Encrypted TOTP secret envelope bytes (None if no TOTP).
+    pub encrypted_totp_secret: Option<Vec<u8>>,
+    /// Encrypted tags envelope bytes (empty if no tags).
+    pub encrypted_tags: Vec<u8>,
+    /// Folder ID (nullable).
+    pub folder_id: Option<String>,
+}
+
+/// Request to update an existing vault entry.
+///
+/// Only fields that are `Some` will be updated. `None` fields
+/// retain their existing values.
+#[derive(Debug, Clone)]
+pub struct UpdateVaultEntryRequest {
+    /// New title (if changing).
+    pub title: Option<String>,
+    /// New username (if changing).
+    pub username: Option<String>,
+    /// New encrypted password envelope bytes (if changing).
+    pub encrypted_password: Option<Vec<u8>>,
+    /// New encrypted URL envelope bytes (if changing).
+    pub encrypted_url: Option<Vec<u8>>,
+    /// New encrypted notes envelope bytes (if changing).
+    pub encrypted_notes: Option<Vec<u8>>,
+    /// New encrypted TOTP secret envelope bytes (if changing).
+    pub encrypted_totp_secret: Option<Option<Vec<u8>>>,
+    /// New encrypted tags envelope bytes (if changing).
+    pub encrypted_tags: Option<Vec<u8>>,
+    /// New folder assignment (if changing).
+    pub folder_id: Option<Option<String>>,
+}
+
+/// Vault entry repository for CRUD operations.
 pub struct VaultEntryRepo;
 
-impl Repository<VaultEntry, CreateEntryRequest, UpdateEntryRequest> for VaultEntryRepo {
-    async fn create(pool: &SqlitePool, request: CreateEntryRequest) -> KestrelResult<VaultEntry> {
-        let id = Uuid::new_v4();
-        let now = Utc::now();
-        let id_str = id.to_string();
-        let now_str = now.to_rfc3339();
-
-        // NOTE: Encrypted fields must be set by the service layer
-        // before calling this repository method. This repository
-        // stores raw bytes — it does not encrypt.
-        let empty_blob = Vec::<u8>::new();
+impl VaultEntryRepo {
+    /// Creates a new vault entry.
+    ///
+    /// The encrypted fields must already be envelope-encrypted
+    /// by the service layer using the DEK before calling this.
+    pub async fn create(
+        pool: &SqlitePool,
+        request: CreateVaultEntryRequest,
+    ) -> KestrelResult<VaultEntryRow> {
+        let id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
             "INSERT INTO vault_entries \
-             (id, title, username, encrypted_password, url, notes, \
-              totp_secret, folder_id, tags, nonce, created_at, updated_at, accessed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
+             (id, title, username, encrypted_password, encrypted_url, encrypted_notes, \
+              encrypted_totp_secret, encrypted_tags, folder_id, \
+              created_at, updated_at, accessed_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
         )
-        .bind(&id_str)
-        .bind(&request.title.as_bytes())  // TODO: encrypt
-        .bind(&request.username.as_bytes()) // TODO: encrypt
-        .bind(&empty_blob)                  // encrypted_password
-        .bind(&empty_blob)                  // url (encrypted)
-        .bind(&empty_blob)                  // notes (encrypted)
-        .bind(&empty_blob)                  // totp_secret (encrypted)
-        .bind(request.folder_id.map(|f| f.to_string()))
-        .bind(&empty_blob)                  // tags (encrypted)
-        .bind(&empty_blob)                  // nonce
-        .bind(&now_str)
-        .bind(&now_str)
-        .bind(&now_str)
+        .bind(&id)
+        .bind(&request.title)
+        .bind(&request.username)
+        .bind(&request.encrypted_password)
+        .bind(&request.encrypted_url)
+        .bind(&request.encrypted_notes)
+        .bind(&request.encrypted_totp_secret)
+        .bind(&request.encrypted_tags)
+        .bind(&request.folder_id)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
         .execute(pool)
         .await
         .map_err(|e| KestrelError::Database(format!("Failed to create entry: {e}")))?;
 
-        Ok(VaultEntry::new(
-            request.title,
-            request.username,
-            empty_blob,
-            empty_blob,
-        ))
+        Ok(VaultEntryRow {
+            id,
+            title: request.title,
+            username: request.username,
+            encrypted_password: request.encrypted_password,
+            encrypted_url: request.encrypted_url,
+            encrypted_notes: request.encrypted_notes,
+            encrypted_totp_secret: request.encrypted_totp_secret,
+            encrypted_tags: request.encrypted_tags,
+            folder_id: request.folder_id,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            accessed_at: now,
+        })
     }
 
-    async fn get_by_id(pool: &SqlitePool, id: Uuid) -> KestrelResult<VaultEntry> {
-        let id_str = id.to_string();
-        let row: sqlx::sqlite::SqliteRow = sqlx::query(
-            "SELECT * FROM vault_entries WHERE id = ?1"
+    /// Gets a vault entry by ID.
+    pub async fn get_by_id(pool: &SqlitePool, id: &str) -> KestrelResult<VaultEntryRow> {
+        let row = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>, String, String, String)>(
+            "SELECT id, title, username, encrypted_password, encrypted_url, \
+             encrypted_notes, encrypted_totp_secret, encrypted_tags, \
+             folder_id, created_at, updated_at, accessed_at \
+             FROM vault_entries WHERE id = ?1"
         )
-        .bind(&id_str)
+        .bind(id)
         .fetch_optional(pool)
         .await
         .map_err(|e| KestrelError::Database(format!("Failed to query entry: {e}")))?
         .ok_or_else(|| KestrelError::Vault(format!("Entry not found: {id}")))?;
 
-        map_row_to_entry(&row)
+        Ok(VaultEntryRow {
+            id: row.0,
+            title: row.1,
+            username: row.2,
+            encrypted_password: row.3,
+            encrypted_url: row.4,
+            encrypted_notes: row.5,
+            encrypted_totp_secret: row.6,
+            encrypted_tags: row.7,
+            folder_id: row.8,
+            created_at: row.9,
+            updated_at: row.10,
+            accessed_at: row.11,
+        })
     }
 
-    async fn update(
+    /// Updates an existing vault entry.
+    ///
+    /// Only fields that are `Some` in the request will be updated.
+    /// Uses a read-then-write approach for partial updates.
+    pub async fn update(
         pool: &SqlitePool,
-        id: Uuid,
-        request: UpdateEntryRequest,
-    ) -> KestrelResult<VaultEntry> {
-        let id_str = id.to_string();
-        let now = Utc::now().to_rfc3339();
+        id: &str,
+        request: UpdateVaultEntryRequest,
+    ) -> KestrelResult<VaultEntryRow> {
+        let now = chrono::Utc::now().to_rfc3339();
 
-        // Build dynamic UPDATE query for partial updates
-        let mut set_clauses = Vec::new();
-        let param_count;
+        // Fetch current values for partial update fallback
+        let current = Self::get_by_id(pool, id).await?;
 
-        set_clauses.push("updated_at = ?".to_string());
+        let new_title = request.title.unwrap_or(current.title);
+        let new_username = request.username.unwrap_or(current.username);
+        let new_encrypted_password = request.encrypted_password.unwrap_or(current.encrypted_password);
+        let new_encrypted_url = request.encrypted_url.unwrap_or(current.encrypted_url);
+        let new_encrypted_notes = request.encrypted_notes.unwrap_or(current.encrypted_notes);
+        let new_encrypted_totp = request.encrypted_totp_secret.flatten().or(current.encrypted_totp_secret);
+        let new_encrypted_tags = request.encrypted_tags.unwrap_or(current.encrypted_tags);
+        let new_folder_id = request.folder_id.flatten().or(current.folder_id);
 
-        if request.title.is_some() {
-            set_clauses.push("title = ?".to_string());
-        }
-        if request.username.is_some() {
-            set_clauses.push("username = ?".to_string());
-        }
-        if request.password.is_some() {
-            set_clauses.push("encrypted_password = ?".to_string());
-        }
-        if request.url.is_some() {
-            set_clauses.push("url = ?".to_string());
-        }
-        if request.notes.is_some() {
-            set_clauses.push("notes = ?".to_string());
-        }
-        if request.folder_id.is_some() {
-            set_clauses.push("folder_id = ?".to_string());
-        }
-        if request.tags.is_some() {
-            set_clauses.push("tags = ?".to_string());
-        }
-
-        param_count = set_clauses.len() + 1; // +1 for WHERE id
-
-        let sql = format!(
-            "UPDATE vault_entries SET {} WHERE id = ?",
-            set_clauses.join(", ")
-        );
-
-        // NOTE: In production, we'd bind parameters dynamically.
-        // For now, use a simpler approach with all fields.
-        let result = sqlx::query(&sql)
-            .bind(&now)
-            .bind(&id_str)
-            .execute(pool)
-            .await
-            .map_err(|e| KestrelError::Database(format!("Failed to update entry: {e}")))?;
+        let result = sqlx::query(
+            "UPDATE vault_entries SET \
+             title = ?1, username = ?2, encrypted_password = ?3, \
+             encrypted_url = ?4, encrypted_notes = ?5, encrypted_totp_secret = ?6, \
+             encrypted_tags = ?7, folder_id = ?8, updated_at = ?9, accessed_at = ?10 \
+             WHERE id = ?11"
+        )
+        .bind(&new_title)
+        .bind(&new_username)
+        .bind(&new_encrypted_password)
+        .bind(&new_encrypted_url)
+        .bind(&new_encrypted_notes)
+        .bind(&new_encrypted_totp)
+        .bind(&new_encrypted_tags)
+        .bind(&new_folder_id)
+        .bind(&now)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to update entry: {e}")))?;
 
         if result.rows_affected() == 0 {
             return Err(KestrelError::Vault(format!("Entry not found: {id}")));
@@ -151,10 +246,10 @@ impl Repository<VaultEntry, CreateEntryRequest, UpdateEntryRequest> for VaultEnt
         Self::get_by_id(pool, id).await
     }
 
-    async fn delete(pool: &SqlitePool, id: Uuid) -> KestrelResult<()> {
-        let id_str = id.to_string();
+    /// Deletes a vault entry by ID.
+    pub async fn delete(pool: &SqlitePool, id: &str) -> KestrelResult<()> {
         let result = sqlx::query("DELETE FROM vault_entries WHERE id = ?1")
-            .bind(&id_str)
+            .bind(id)
             .execute(pool)
             .await
             .map_err(|e| KestrelError::Database(format!("Failed to delete entry: {e}")))?;
@@ -165,56 +260,96 @@ impl Repository<VaultEntry, CreateEntryRequest, UpdateEntryRequest> for VaultEnt
         Ok(())
     }
 
-    async fn list(
+    /// Lists vault entries with pagination.
+    ///
+    /// Returns entries ordered by most recently updated first.
+    /// Encrypted fields are included as raw bytes — decryption
+    /// is handled by the service layer.
+    pub async fn list(
         pool: &SqlitePool,
-        limit: Option<i64>,
+        limit: i64,
         offset: i64,
-    ) -> KestrelResult<Vec<VaultEntry>> {
-        let limit_val = limit.unwrap_or(50);
-        let rows = sqlx::query(
-            "SELECT * FROM vault_entries ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
+    ) -> KestrelResult<Vec<VaultEntryRow>> {
+        let rows = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>, String, String, String)>(
+            "SELECT id, title, username, encrypted_password, encrypted_url, \
+             encrypted_notes, encrypted_totp_secret, encrypted_tags, \
+             folder_id, created_at, updated_at, accessed_at \
+             FROM vault_entries ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
         )
-        .bind(limit_val)
+        .bind(limit)
         .bind(offset)
         .fetch_all(pool)
         .await
         .map_err(|e| KestrelError::Database(format!("Failed to list entries: {e}")))?;
 
-        rows.iter().map(|r| map_row_to_entry(r)).collect()
+        Ok(rows.into_iter().map(|r| VaultEntryRow {
+            id: r.0, title: r.1, username: r.2, encrypted_password: r.3,
+            encrypted_url: r.4, encrypted_notes: r.5, encrypted_totp_secret: r.6,
+            encrypted_tags: r.7, folder_id: r.8, created_at: r.9,
+            updated_at: r.10, accessed_at: r.11,
+        }).collect())
     }
-}
 
-impl VaultEntryRepo {
     /// Lists entries by folder.
     pub async fn list_by_folder(
         pool: &SqlitePool,
-        folder_id: Uuid,
-    ) -> KestrelResult<Vec<VaultEntry>> {
-        let folder_str = folder_id.to_string();
-        let rows = sqlx::query(
-            "SELECT * FROM vault_entries WHERE folder_id = ?1 ORDER BY title"
+        folder_id: &str,
+    ) -> KestrelResult<Vec<VaultEntryRow>> {
+        let rows = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>, String, String, String)>(
+            "SELECT id, title, username, encrypted_password, encrypted_url, \
+             encrypted_notes, encrypted_totp_secret, encrypted_tags, \
+             folder_id, created_at, updated_at, accessed_at \
+             FROM vault_entries WHERE folder_id = ?1 ORDER BY title"
         )
-        .bind(&folder_str)
+        .bind(folder_id)
         .fetch_all(pool)
         .await
         .map_err(|e| KestrelError::Database(format!("Failed to list by folder: {e}")))?;
 
-        rows.iter().map(|r| map_row_to_entry(r)).collect()
+        Ok(rows.into_iter().map(|r| VaultEntryRow {
+            id: r.0, title: r.1, username: r.2, encrypted_password: r.3,
+            encrypted_url: r.4, encrypted_notes: r.5, encrypted_totp_secret: r.6,
+            encrypted_tags: r.7, folder_id: r.8, created_at: r.9,
+            updated_at: r.10, accessed_at: r.11,
+        }).collect())
+    }
+
+    /// Lists entries not in any folder (root level).
+    pub async fn list_root(pool: &SqlitePool) -> KestrelResult<Vec<VaultEntryRow>> {
+        let rows = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>, String, String, String)>(
+            "SELECT id, title, username, encrypted_password, encrypted_url, \
+             encrypted_notes, encrypted_totp_secret, encrypted_tags, \
+             folder_id, created_at, updated_at, accessed_at \
+             FROM vault_entries WHERE folder_id IS NULL ORDER BY title"
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to list root entries: {e}")))?;
+
+        Ok(rows.into_iter().map(|r| VaultEntryRow {
+            id: r.0, title: r.1, username: r.2, encrypted_password: r.3,
+            encrypted_url: r.4, encrypted_notes: r.5, encrypted_totp_secret: r.6,
+            encrypted_tags: r.7, folder_id: r.8, created_at: r.9,
+            updated_at: r.10, accessed_at: r.11,
+        }).collect())
     }
 
     /// Searches entries by title and username (plaintext fields).
     ///
     /// NOTE: This searches plaintext metadata only. Encrypted fields
     /// are not searchable without decryption. A blind search index
-    /// will be implemented in a future phase.
+    /// using HKDF-derived sub-keys will be implemented in a future phase.
     pub async fn search(
         pool: &SqlitePool,
         query: &str,
         limit: i64,
-    ) -> KestrelResult<Vec<VaultEntry>> {
+    ) -> KestrelResult<Vec<VaultEntryRow>> {
         let pattern = format!("%{query}%");
-        let rows = sqlx::query(
-            "SELECT * FROM vault_entries \
+        let rows = sqlx::query_as::<_, (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>, Vec<u8>, Option<String>, String, String, String)>(
+            "SELECT id, title, username, encrypted_password, encrypted_url, \
+             encrypted_notes, encrypted_totp_secret, encrypted_tags, \
+             folder_id, created_at, updated_at, accessed_at \
+             FROM vault_entries \
              WHERE title LIKE ?1 OR username LIKE ?1 \
              ORDER BY updated_at DESC LIMIT ?2"
         )
@@ -224,7 +359,12 @@ impl VaultEntryRepo {
         .await
         .map_err(|e| KestrelError::Database(format!("Failed to search entries: {e}")))?;
 
-        rows.iter().map(|r| map_row_to_entry(r)).collect()
+        Ok(rows.into_iter().map(|r| VaultEntryRow {
+            id: r.0, title: r.1, username: r.2, encrypted_password: r.3,
+            encrypted_url: r.4, encrypted_notes: r.5, encrypted_totp_secret: r.6,
+            encrypted_tags: r.7, folder_id: r.8, created_at: r.9,
+            updated_at: r.10, accessed_at: r.11,
+        }).collect())
     }
 
     /// Returns the total entry count.
@@ -236,23 +376,97 @@ impl VaultEntryRepo {
 
         Ok(row.0)
     }
+
+    /// Gets just the encrypted password envelope bytes for an entry.
+    ///
+    /// Useful for password reveal operations where we don't need
+    /// to load the entire entry.
+    pub async fn get_encrypted_password(
+        pool: &SqlitePool,
+        id: &str,
+    ) -> KestrelResult<Vec<u8>> {
+        let result: Option<(Vec<u8>,)> = sqlx::query_as(
+            "SELECT encrypted_password FROM vault_entries WHERE id = ?1"
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to get password: {e}")))?
+        .ok_or_else(|| KestrelError::Vault(format!("Entry not found: {id}")))?;
+
+        Ok(result.0)
+    }
+
+    /// Updates the accessed_at timestamp for an entry.
+    ///
+    /// Called when the entry is viewed or its password is revealed.
+    pub async fn touch_accessed(pool: &SqlitePool, id: &str) -> KestrelResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        sqlx::query("UPDATE vault_entries SET accessed_at = ?1 WHERE id = ?2")
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to touch entry: {e}")))?;
+
+        Ok(())
+    }
 }
 
-/// Maps a database row to a VaultEntry.
-///
-/// NOTE: Encrypted fields are returned as raw bytes.
-/// Decryption is handled by the service layer.
-fn map_row_to_entry(row: &sqlx::sqlite::SqliteRow) -> KestrelResult<VaultEntry> {
-    let id_str: String = row.try_get("id")
-        .map_err(|e| KestrelError::Database(format!("Missing id: {e}")))?;
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|e| KestrelError::Database(format!("Invalid UUID: {e}")))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // TODO: Properly map all encrypted fields from BLOB
-    Ok(VaultEntry::new(
-        String::from_utf8_lossy(&[]).to_string(), // placeholder
-        String::from_utf8_lossy(&[]).to_string(), // placeholder
-        Vec::new(),
-        Vec::new(),
-    ))
+    #[test]
+    fn create_entry_request_builds() {
+        let req = CreateVaultEntryRequest {
+            title: "GitHub".to_string(),
+            username: "user@example.com".to_string(),
+            encrypted_password: vec![1, 2, 3],
+            encrypted_url: vec![4, 5, 6],
+            encrypted_notes: vec![7, 8, 9],
+            encrypted_totp_secret: None,
+            encrypted_tags: vec![10, 11, 12],
+            folder_id: None,
+        };
+        assert_eq!(req.title, "GitHub");
+        assert!(!req.encrypted_password.is_empty());
+    }
+
+    #[test]
+    fn update_entry_request_partial() {
+        let req = UpdateVaultEntryRequest {
+            title: Some("New Title".to_string()),
+            username: None,
+            encrypted_password: Some(vec![1, 2, 3]),
+            encrypted_url: None,
+            encrypted_notes: None,
+            encrypted_totp_secret: None,
+            encrypted_tags: None,
+            folder_id: None,
+        };
+        assert!(req.title.is_some());
+        assert!(req.username.is_none());
+    }
+
+    #[test]
+    fn vault_entry_row_serializes() {
+        let row = VaultEntryRow {
+            id: "test-id".to_string(),
+            title: "GitHub".to_string(),
+            username: "user".to_string(),
+            encrypted_password: vec![1, 2, 3],
+            encrypted_url: vec![4, 5, 6],
+            encrypted_notes: vec![7, 8, 9],
+            encrypted_totp_secret: None,
+            encrypted_tags: vec![10, 11, 12],
+            folder_id: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            accessed_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&row).unwrap();
+        assert!(json.contains("GitHub"));
+    }
 }
