@@ -28,18 +28,22 @@ use crate::commands::types::{
     validate_master_password, CommandError, CommandResult, SessionResponse, VaultInitResponse,
     VaultLockResponse, VaultStatusResponse,
 };
+use crate::crypto::kdf::{MEMORY_COST, ITERATIONS, PARALLELISM};
+use crate::crypto::key_management::MasterKey;
+use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
 use crate::error::KestrelError;
 use crate::security::lockout::{FailedAttemptTracker, LockoutState};
 use crate::security::rate_limit::{Operation, RateLimiter};
 use crate::security::vault_state::{VaultContext, VaultState, VaultStateMachine, VaultTransition};
 use std::sync::RwLock;
 use tauri::State;
+use zeroize::Zeroize;
 
 /// App state shared across Tauri commands.
 ///
 /// This struct is managed by Tauri's state management and
 /// provides access to the vault state machine, rate limiter,
-/// lockout tracker, and other shared resources.
+/// lockout tracker, master key, and database pool.
 ///
 /// # Thread Safety
 ///
@@ -51,7 +55,7 @@ use tauri::State;
 ///
 /// - The master key is stored in `Option<MasterKey>` behind a RwLock.
 ///   When the vault is locked, the key is dropped (zeroized via
-///   the `secrecy` crate's `Secret` type).
+///   the `secrecy` crate's `Secret` type and `ZeroizeOnDrop`).
 /// - No passwords are ever stored in this struct.
 pub struct AppState {
     /// The vault lifecycle state machine.
@@ -62,10 +66,14 @@ pub struct AppState {
     pub lockout_tracker: RwLock<FailedAttemptTracker>,
     /// The master key, present only when vault is unlocked.
     /// When the vault is locked, this is `None` and the key
-    /// memory has been zeroized.
-    /// TODO: Replace with `RwLock<Option<MasterKey>>` once
-    ///       MasterKey is integrated from crypto::key_management.
-    pub master_key_present: RwLock<bool>,
+    /// memory has been zeroized via `ZeroizeOnDrop`.
+    pub master_key: RwLock<Option<MasterKey>>,
+    /// Hex-encoded salt for key derivation (persisted in vault_meta).
+    /// Available after vault initialization.
+    pub salt_hex: RwLock<Option<String>>,
+    /// Test envelope bytes for password verification.
+    /// Available after vault initialization.
+    pub test_envelope: RwLock<Option<Vec<u8>>>,
 }
 
 impl Default for AppState {
@@ -74,7 +82,9 @@ impl Default for AppState {
             vault_state_machine: RwLock::new(VaultStateMachine::new()),
             rate_limiter: RwLock::new(RateLimiter::new()),
             lockout_tracker: RwLock::new(FailedAttemptTracker::new()),
-            master_key_present: RwLock::new(false),
+            master_key: RwLock::new(None),
+            salt_hex: RwLock::new(None),
+            test_envelope: RwLock::new(None),
         }
     }
 }
@@ -156,6 +166,55 @@ impl AppState {
             )),
         }
     }
+
+    /// Returns a reference to the master key if the vault is unlocked.
+    ///
+    /// Returns `None` if the vault is locked or uninitialized.
+    /// This is used by vault commands that need to encrypt/decrypt data.
+    pub fn get_master_key(&self) -> Option<MasterKey> {
+        let guard = self.master_key.read().unwrap_or_else(|e| {
+            tracing::error!("Master key lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone()
+    }
+
+    /// Loads vault metadata (salt + test envelope) from the database.
+    ///
+    /// This should be called on app startup to restore the vault state.
+    /// When vault_meta exists, the vault is in the Locked state.
+    ///
+    /// # TODO
+    ///
+    /// - Connect to the actual database once SQLCipher is integrated
+    /// - Load salt_hex and test_envelope from vault_meta table
+    pub fn load_vault_meta(&self) -> Result<(), CommandError> {
+        // TODO: Load from database
+        // For now, if salt_hex and test_envelope are already set (from
+        // a previous initialize in this session), keep them.
+        Ok(())
+    }
+
+    /// Stores vault metadata in memory after initialization.
+    ///
+    /// This updates the in-memory salt and test envelope so that
+    /// unlock can work without querying the database.
+    fn store_vault_meta_in_memory(&self, salt_hex: String, test_envelope: Vec<u8>) {
+        {
+            let mut salt = self.salt_hex.write().unwrap_or_else(|e| {
+                tracing::error!("Salt lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *salt = Some(salt_hex);
+        }
+        {
+            let mut envelope = self.test_envelope.write().unwrap_or_else(|e| {
+                tracing::error!("Test envelope lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *envelope = Some(test_envelope);
+        }
+    }
 }
 
 /// Initializes the vault for the first time.
@@ -194,7 +253,22 @@ pub fn auth_initialize_vault(
     // Guard: vault must be in Uninitialized state
     state.require_state(VaultState::Uninitialized)?;
 
-    // Transition: Uninitialized → Locked
+    // ── Crypto: Derive master key + create test envelope ──
+    let (master_key, salt, test_envelope_bytes) = {
+        let mut password_bytes = master_password.as_bytes().to_vec();
+        let result = initialize_vault_crypto(&password_bytes);
+        // Zeroize password bytes immediately
+        password_bytes.zeroize();
+        match result {
+            Ok(r) => r,
+            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+        }
+    };
+
+    // Encode salt as hex for storage
+    let salt_hex: String = salt.0.iter().map(|b| format!("{b:02x}")).collect();
+
+    // ── Transition: Uninitialized → Locked ──
     {
         let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
             tracing::error!("Vault state machine lock poisoned: {}", e);
@@ -219,12 +293,34 @@ pub fn auth_initialize_vault(
         }
     }
 
-    // TODO: Generate salt using crypto::random
-    // TODO: Derive master key from password using crypto::kdf
-    // TODO: Create test envelope for verification using crypto::envelope
-    // TODO: Store vault_meta in database via VaultMetaRepo
+    // ── Store vault metadata in memory ──
+    // In production, this would be persisted to the database via VaultMetaRepo.
+    // For now, we store it in AppState for the current session.
+    state.store_vault_meta_in_memory(salt_hex.clone(), test_envelope_bytes.clone());
+
+    // ── Store master key in AppState (vault is now Locked, NOT Unlocked) ──
+    // After initialization, the vault goes to Locked state.
+    // The master key is NOT stored — the user must explicitly unlock.
+    // We zeroize the master key immediately since we're going to Locked state.
+    drop(master_key);
+
+    // TODO: Persist vault_meta to database via VaultMetaRepo
+    // vault_meta: {
+    //   id: 1,
+    //   salt: salt_hex,
+    //   iterations: ITERATIONS,
+    //   memory_cost: MEMORY_COST,
+    //   parallelism: PARALLELISM,
+    //   test_envelope: test_envelope_bytes,
+    //   hint: hint,
+    // }
     // TODO: Audit log: VaultInitialized
-    // TODO: Zeroize master_password
+    // TODO: Zeroize master_password String
+
+    tracing::info!(
+        "Vault initialized with Argon2id (memory={}KiB, iterations={}, parallelism={})",
+        MEMORY_COST, ITERATIONS, PARALLELISM
+    );
 
     CommandResult::ok(VaultInitResponse {
         initialized: true,
@@ -285,96 +381,152 @@ pub fn auth_unlock(
     // Guard: check lockout state
     state.check_lockout()?;
 
-    // TODO: Derive key from password
-    // TODO: Verify test envelope
-    // TODO: If verification fails:
-    //   - Record failed attempt in lockout tracker
-    //   - Record failed attempt in state machine
-    //   - Audit log: UnlockFailed
-    //   - Zeroize master_password
-    //   - Return error
-
-    // Simulate successful verification for now:
-    let unlock_succeeded = true;
-
-    if !unlock_succeeded {
-        // Record failure
-        {
-            let mut tracker = state.lockout_tracker.write().unwrap_or_else(|e| {
-                tracing::error!("Lockout tracker lock poisoned: {}", e);
+    // ── Crypto: Derive key + verify test envelope ──
+    let unlock_result = {
+        // Get the stored salt and test envelope
+        let salt_hex = {
+            let guard = state.salt_hex.read().unwrap_or_else(|e| {
+                tracing::error!("Salt lock poisoned: {}", e);
                 std::process::exit(1);
             });
-            tracker.record_failed_attempt();
-        }
-        {
-            let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
-                tracing::error!("Vault state machine lock poisoned: {}", e);
+            guard.clone()
+        };
+        let test_envelope_bytes = {
+            let guard = state.test_envelope.read().unwrap_or_else(|e| {
+                tracing::error!("Test envelope lock poisoned: {}", e);
                 std::process::exit(1);
             });
-            sm.record_failed_unlock();
-        }
-        // TODO: Audit log: UnlockFailed
-        // TODO: Zeroize master_password
-        return CommandResult::Err(CommandError::unauthorized(
-            "Incorrect master password",
-        ));
-    }
+            guard.clone()
+        };
 
-    // Successful unlock
-    {
-        let mut tracker = state.lockout_tracker.write().unwrap_or_else(|e| {
-            tracing::error!("Lockout tracker lock poisoned: {}", e);
-            std::process::exit(1);
-        });
-        tracker.reset();
-    }
+        match (salt_hex, test_envelope_bytes) {
+            (Some(sh), Some(te)) => {
+                // Parse salt from hex
+                let salt_bytes: Vec<u8> = (0..sh.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&sh[i..i + 2], 16).unwrap_or(0))
+                    .collect();
 
-    // Transition: Locked → Unlocked
-    let session_id;
-    {
-        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
-            tracing::error!("Vault state machine lock poisoned: {}", e);
-            std::process::exit(1);
-        });
-        let context = VaultContext::with_state(VaultState::Locked);
-        match sm.transition(VaultTransition::Unlock, &context) {
-            Ok(result) => {
-                tracing::info!(
-                    "Vault unlocked: {:?} → {:?}",
-                    result.from_state,
-                    result.to_state
-                );
-                for event in sm.drain_events() {
-                    tracing::info!("Vault event: {:?}", event);
+                let mut salt_array = [0u8; 16];
+                if salt_bytes.len() == 16 {
+                    salt_array.copy_from_slice(&salt_bytes);
+                } else {
+                    return CommandResult::Err(CommandError::from_kestrel(
+                        KestrelError::Crypto("Invalid salt length".to_string()),
+                    ));
                 }
+
+                let salt = crate::crypto::kdf::Salt(salt_array);
+                let mut password_bytes = master_password.as_bytes().to_vec();
+
+                let result = unlock_vault_crypto(&password_bytes, &salt, &te);
+
+                // Zeroize password bytes immediately
+                password_bytes.zeroize();
+                result
             }
-            Err(e) => {
-                return CommandResult::Err(CommandError::from_kestrel(e));
-            }
+            (None, _) => Err(KestrelError::Config(
+                "Vault salt not found. Vault may not be initialized.".to_string(),
+            )),
+            (_, None) => Err(KestrelError::Config(
+                "Test envelope not found. Vault may not be initialized.".to_string(),
+            )),
         }
-        session_id = uuid::Uuid::new_v4().to_string();
+    };
+
+    match unlock_result {
+        Ok(master_key) => {
+            // ── Successful unlock ──
+
+            // Reset lockout tracker
+            {
+                let mut tracker = state.lockout_tracker.write().unwrap_or_else(|e| {
+                    tracing::error!("Lockout tracker lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                tracker.reset();
+            }
+
+            // Transition: Locked → Unlocked
+            let session_id;
+            {
+                let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+                    tracing::error!("Vault state machine lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                let context = VaultContext::with_state(VaultState::Locked);
+                match sm.transition(VaultTransition::Unlock, &context) {
+                    Ok(result) => {
+                        tracing::info!(
+                            "Vault unlocked: {:?} → {:?}",
+                            result.from_state,
+                            result.to_state
+                        );
+                        for event in sm.drain_events() {
+                            tracing::info!("Vault event: {:?}", event);
+                        }
+                    }
+                    Err(e) => {
+                        return CommandResult::Err(CommandError::from_kestrel(e));
+                    }
+                }
+                session_id = uuid::Uuid::new_v4().to_string();
+            }
+
+            // Store master key in AppState
+            {
+                let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
+                    tracing::error!("Master key lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                *key_guard = Some(master_key);
+            }
+
+            // TODO: Create Session via SessionManager
+            // TODO: Audit log: UnlockSucceeded
+            // TODO: Zeroize master_password String
+
+            CommandResult::ok(SessionResponse {
+                session_id,
+                expires_at: chrono::Utc::now()
+                    + chrono::Duration::minutes(15), // Default; should use config
+                is_unlocked: true,
+            })
+        }
+        Err(KestrelError::Unauthorized(msg)) => {
+            // ── Failed unlock (wrong password) ──
+
+            // Record failure in lockout tracker
+            {
+                let mut tracker = state.lockout_tracker.write().unwrap_or_else(|e| {
+                    tracing::error!("Lockout tracker lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                tracker.record_failed_attempt();
+            }
+
+            // Record failure in state machine
+            {
+                let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+                    tracing::error!("Vault state machine lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                sm.record_failed_unlock();
+            }
+
+            tracing::warn!("Failed unlock attempt: {}", msg);
+
+            // TODO: Audit log: UnlockFailed
+
+            CommandResult::Err(CommandError::unauthorized(
+                "Incorrect master password",
+            ))
+        }
+        Err(e) => {
+            // Other errors (crypto, config, etc.)
+            CommandResult::Err(CommandError::from_kestrel(e))
+        }
     }
-
-    // Mark master key as present
-    {
-        let mut key_present = state.master_key_present.write().unwrap_or_else(|e| {
-            tracing::error!("Master key flag lock poisoned: {}", e);
-            std::process::exit(1);
-        });
-        *key_present = true;
-    }
-
-    // TODO: Create Session
-    // TODO: Store MasterKey in AppState
-    // TODO: Audit log: UnlockSucceeded
-    // TODO: Zeroize master_password
-
-    CommandResult::ok(SessionResponse {
-        session_id,
-        expires_at: chrono::Utc::now()
-            + chrono::Duration::minutes(15), // Default; should use config
-        is_unlocked: true,
-    })
 }
 
 /// Locks the vault immediately.
@@ -422,13 +574,15 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         }
     }
 
-    // Zeroize master key
+    // ── Zeroize master key ──
     {
-        let mut key_present = state.master_key_present.write().unwrap_or_else(|e| {
-            tracing::error!("Master key flag lock poisoned: {}", e);
+        let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
+            tracing::error!("Master key lock poisoned: {}", e);
             std::process::exit(1);
         });
-        *key_present = false;
+        // Dropping the MasterKey triggers ZeroizeOnDrop, which
+        // securely erases the key material from memory.
+        *key_guard = None;
     }
 
     // Reset rate limiter for login
@@ -440,10 +594,11 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         limiter.reset_operation(Operation::Login);
     }
 
-    // TODO: Zeroize actual MasterKey (when integrated)
-    // TODO: Destroy Session
+    // TODO: Destroy Session via SessionManager
     // TODO: Clear all decrypted data from memory
     // TODO: Audit log: VaultLocked
+
+    tracing::info!("Vault locked — master key zeroized");
 
     CommandResult::ok(VaultLockResponse {
         state: VaultState::Locked.to_string(),
@@ -465,7 +620,7 @@ pub fn auth_get_session(
     });
 
     if sm.state() == VaultState::Unlocked {
-        // TODO: Return actual session data
+        // TODO: Return actual session data from SessionManager
         CommandResult::ok(Some(SessionResponse {
             session_id: "active".to_string(),
             expires_at: "todo".to_string(),
@@ -554,13 +709,89 @@ pub fn auth_change_password(
     // Guard: vault must be unlocked
     state.require_unlocked()?;
 
-    // TODO: Verify current password (derive key, check test envelope)
-    // TODO: Derive new key from new password
-    // TODO: Re-encrypt all vault entries in a transaction
-    // TODO: Update vault_meta with new salt and test envelope
-    // TODO: Zeroize old key
-    // TODO: Zeroize current_password and new_password
+    // ── Verify current password ──
+    // Derive a key from the current password and check against test envelope
+    let current_key_verified = {
+        let salt_hex = state.salt_hex.read().unwrap_or_else(|e| {
+            tracing::error!("Salt lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        let test_envelope = state.test_envelope.read().unwrap_or_else(|e| {
+            tracing::error!("Test envelope lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+
+        match (salt_hex.as_ref(), test_envelope.as_ref()) {
+            (Some(sh), Some(te)) => {
+                let salt_bytes: Vec<u8> = (0..sh.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&sh[i..i + 2], 16).unwrap_or(0))
+                    .collect();
+
+                if salt_bytes.len() != 16 {
+                    false
+                } else {
+                    let mut salt_array = [0u8; 16];
+                    salt_array.copy_from_slice(&salt_bytes);
+                    let salt = crate::crypto::kdf::Salt(salt_array);
+
+                    let mut password_bytes = current_password.as_bytes().to_vec();
+                    let result = unlock_vault_crypto(&password_bytes, &salt, te);
+                    password_bytes.zeroize();
+
+                    result.is_ok()
+                }
+            }
+            _ => false,
+        }
+    };
+
+    if !current_key_verified {
+        return CommandResult::Err(CommandError::unauthorized(
+            "Current password is incorrect",
+        ));
+    }
+
+    // ── Derive new key from new password ──
+    let (new_master_key, new_salt, new_test_envelope) = {
+        let mut new_password_bytes = new_password.as_bytes().to_vec();
+        let result = initialize_vault_crypto(&new_password_bytes);
+        new_password_bytes.zeroize();
+        match result {
+            Ok(r) => r,
+            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+        }
+    };
+
+    let new_salt_hex: String = new_salt.0.iter().map(|b| format!("{b:02x}")).collect();
+
+    // ── Re-encrypt all vault entries with the new key ──
+    // TODO: Implement transactional re-encryption
+    // 1. Load all vault entries from database
+    // 2. Decrypt each sensitive field with old key
+    // 3. Re-encrypt each field with new key
+    // 4. Update all entries in a transaction
+    // 5. If any step fails, rollback
+
+    // For now, we just update the master key and metadata:
+    {
+        let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
+            tracing::error!("Master key lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        // Old key is dropped → zeroized via ZeroizeOnDrop
+        *key_guard = Some(new_master_key);
+    }
+
+    // Update vault metadata in memory
+    state.store_vault_meta_in_memory(new_salt_hex, new_test_envelope.clone());
+
+    // TODO: Persist updated vault_meta to database
+    // TODO: Re-encrypt all vault entries with new key
+    // TODO: Zeroize current_password and new_password Strings
     // TODO: Audit log: PasswordChanged
+
+    tracing::info!("Master password changed — key rotated");
 
     CommandResult::ok(())
 }

@@ -28,9 +28,19 @@ use crate::commands::types::{
     PasswordRevealResponse, VaultEntryResponse,
     MAX_NOTES_LEN, MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
 };
+use crate::crypto::vault_crypto::VaultCryptoService;
+#[allow(unused_imports)]
+use crate::crypto::vault_crypto::field_names;
+#[allow(unused_imports)]
+use crate::security::vault_state::VaultState;
 use tauri::State;
+use zeroize::Zeroize;
 
 use super::auth_commands::AppState;
+
+/// Default auto-clear timeout for password reveals (in seconds).
+#[allow(dead_code)]
+const DEFAULT_AUTO_CLEAR_SECONDS: u32 = 30;
 
 /// Creates a new vault entry.
 ///
@@ -38,14 +48,14 @@ use super::auth_commands::AppState;
 /// The response does NOT include the password.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Creates encrypted entry in database
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Creates encrypted entry in database
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Invalid input fields
+///
+/// - `UNAUTHORIZED`: Vault is locked
+/// - `VALIDATION_ERROR`: Invalid input fields
 #[tauri::command]
 pub fn vault_create_entry(
     title: String,
@@ -84,17 +94,59 @@ pub fn vault_create_entry(
         validate_field(tag, 64, "Tag")?;
     }
 
-    // TODO: Encrypt password using seal_envelope with AAD context
-    //       entity_id = entry_id, field_name = "password"
-    // TODO: Encrypt notes using seal_envelope with AAD context
-    //       entity_id = entry_id, field_name = "notes"
-    // TODO: Insert into database via VaultEntryRepo
-    // TODO: Audit log: EntryCreated { entry_id }
-    // TODO: Zeroize plaintext password from memory
+    // ── Get master key for encryption ──
+    let master_key = state.get_master_key().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — master key not available")
+    })?;
 
-    // Placeholder response
+    let entry_id = uuid::Uuid::new_v4().to_string();
+    let crypto_service = VaultCryptoService::new(&master_key);
+
+    // ── Encrypt sensitive fields ──
+    let encrypted_password = {
+        let mut password_bytes = password.as_bytes().to_vec();
+        let result = crypto_service.encrypt_password(&entry_id, &password_bytes);
+        password_bytes.zeroize();
+        match result {
+            Ok(enc) => enc.envelope_bytes,
+            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+        }
+    };
+
+    let encrypted_notes = match &notes {
+        Some(n) if !n.is_empty() => {
+            match crypto_service.encrypt_notes(&entry_id, n.as_bytes()) {
+                Ok(enc) => Some(enc.envelope_bytes),
+                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+            }
+        }
+        _ => None,
+    };
+
+    // ── Persist to database ──
+    // TODO: Insert into database via VaultEntryRepo
+    // The encrypted_password and encrypted_notes envelope bytes are
+    // ready for storage as BLOBs.
+    // Also store: id, title (plaintext for search), username (plaintext
+    // for search), url (encrypted for privacy), folder_id, tags (encrypted
+    // for privacy), created_at, updated_at
+
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
+
+    // TODO: Audit log: EntryCreated { entry_id }
+    // TODO: Zeroize password String
+
+    tracing::info!("Vault entry created: id={}", entry_id);
+
     CommandResult::ok(VaultEntryResponse {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: entry_id,
         title,
         username,
         url,
@@ -114,14 +166,14 @@ pub fn vault_create_entry(
 /// Use `vault_reveal_password` to access the password.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Read-only
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Read-only
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Invalid UUID
+///
+/// - `UNAUTHORIZED`: Vault is locked
+/// - `VALIDATION_ERROR`: Invalid UUID
 #[tauri::command]
 pub fn vault_get_entry(
     id: String,
@@ -131,6 +183,15 @@ pub fn vault_get_entry(
     state.require_unlocked()?;
 
     validate_uuid(&id, "id")?;
+
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
 
     // TODO: Load from database via VaultEntryRepo
     // TODO: Map to VaultEntryResponse (no password)
@@ -144,14 +205,14 @@ pub fn vault_get_entry(
 /// provided, it is encrypted before storage.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Re-encrypt changed fields, update database
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Re-encrypt changed fields, update database
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Invalid input fields
+///
+/// - `UNAUTHORIZED`: Vault is locked
+/// - `VALIDATION_ERROR`: Invalid input fields
 #[tauri::command]
 pub fn vault_update_entry(
     id: String,
@@ -188,8 +249,48 @@ pub fn vault_update_entry(
         validate_field(n, MAX_NOTES_LEN, "Notes")?;
     }
 
+    // ── Get master key for re-encryption ──
+    let master_key = state.get_master_key().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — master key not available")
+    })?;
+    let crypto_service = VaultCryptoService::new(&master_key);
+
+    // ── Re-encrypt changed sensitive fields ──
+    if let Some(ref new_password) = password {
+        let mut password_bytes = new_password.as_bytes().to_vec();
+        let encrypted = crypto_service.encrypt_password(&id, &password_bytes);
+        password_bytes.zeroize();
+        match encrypted {
+            Ok(enc) => {
+                // TODO: Update encrypted_password in database with enc.envelope_bytes
+                let _ = enc; // Use when DB is wired
+            }
+            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+        }
+    }
+
+    if let Some(ref new_notes) = notes {
+        if !new_notes.is_empty() {
+            match crypto_service.encrypt_notes(&id, new_notes.as_bytes()) {
+                Ok(enc) => {
+                    // TODO: Update encrypted_notes in database with enc.envelope_bytes
+                    let _ = enc;
+                }
+                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+            }
+        }
+    }
+
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
+
     // TODO: Load existing entry from database
-    // TODO: Re-encrypt changed sensitive fields using seal_envelope
     // TODO: Update in database
     // TODO: Audit log: EntryUpdated { entry_id, changed_fields }
     // TODO: Zeroize any plaintext passwords
@@ -202,14 +303,14 @@ pub fn vault_update_entry(
 /// Requires confirmation to prevent accidental deletion.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Permanent deletion
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Permanent deletion
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Invalid UUID or missing confirmation
+///
+/// - `UNAUTHORIZED`: Vault is locked
+/// - `VALIDATION_ERROR`: Invalid UUID or missing confirmation
 #[tauri::command]
 pub fn vault_delete_entry(
     id: String,
@@ -226,8 +327,19 @@ pub fn vault_delete_entry(
         ));
     }
 
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
+
     // TODO: Delete from database via VaultEntryRepo
     // TODO: Audit log: EntryDeleted { entry_id }
+
+    tracing::info!("Vault entry deleted: id={}", id);
 
     CommandResult::ok(())
 }
@@ -237,13 +349,13 @@ pub fn vault_delete_entry(
 /// Returns entry metadata only — no passwords.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Read-only
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Read-only
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
+///
+/// - `UNAUTHORIZED`: Vault is locked
 #[tauri::command]
 pub fn vault_list_entries(
     folder_id: Option<String>,
@@ -257,8 +369,17 @@ pub fn vault_list_entries(
     if let Some(ref fid) = folder_id {
         validate_uuid(fid, "folder_id")?;
     }
-    let limit = limit.unwrap_or(50).min(200);
-    let offset = offset.unwrap_or(0).max(0);
+    let _limit = limit.unwrap_or(50).min(200);
+    let _offset = offset.unwrap_or(0).max(0);
+
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
 
     // TODO: Load entries from database via VaultEntryRepo
     // TODO: Map to VaultEntryResponse (no passwords)
@@ -271,14 +392,14 @@ pub fn vault_list_entries(
 /// Search operates on plaintext metadata only (not encrypted fields).
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Read-only
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Read-only
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Query too long
+///
+/// - `UNAUTHORIZED`: Vault is locked
+/// - `VALIDATION_ERROR`: Query too long
 #[tauri::command]
 pub fn vault_search_entries(
     query: String,
@@ -289,7 +410,16 @@ pub fn vault_search_entries(
     state.require_unlocked()?;
 
     validate_field(&query, 256, "Query")?;
-    let limit = limit.unwrap_or(50).min(200);
+    let _limit = limit.unwrap_or(50).min(200);
+
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
 
     // TODO: Search database by title/username via VaultEntryRepo
 
@@ -302,19 +432,19 @@ pub fn vault_search_entries(
 /// The frontend should auto-clear the password after a timeout.
 ///
 /// # IPC Contract
-//!
-//! - **Required state**: Unlocked
-//! - **Effect**: Decrypt + audit log
-//!
+///
+/// - **Required state**: Unlocked
+/// - **Effect**: Decrypt + audit log
+///
 /// # Security
-//!
-//! - Audit-logged (who revealed what and when)
-//! - Auto-clear metadata included in response
-//! - Should only be called on explicit user action
-//!
+///
+/// - Audit-logged (who revealed what and when)
+/// - Auto-clear metadata included in response
+/// - Should only be called on explicit user action
+///
 /// # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
+///
+/// - `UNAUTHORIZED`: Vault is locked
 #[tauri::command]
 pub fn vault_reveal_password(
     id: String,
@@ -325,11 +455,40 @@ pub fn vault_reveal_password(
 
     validate_uuid(&id, "id")?;
 
-    // TODO: Load encrypted password from database via VaultEntryRepo
-    // TODO: Decrypt using open_envelope with AAD context
-    //       entity_id = entry_id, field_name = "password"
-    // TODO: Audit log: PasswordRevealed { entry_id }
-    // TODO: Set auto_clear_seconds from config
+    // ── Get master key for decryption ──
+    let master_key = state.get_master_key().ok_or_else(|| {
+        CommandError::unauthorized("Vault is locked — master key not available")
+    })?;
+    let crypto_service = VaultCryptoService::new(&master_key);
 
-    CommandResult::Err(CommandError::validation("Not yet implemented"))
+    // ── Record activity ──
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
+
+    // TODO: Load encrypted password envelope bytes from database via VaultEntryRepo
+    // For now, we simulate the flow:
+    //
+    // 1. Load encrypted_password BLOB from database for the given entry_id
+    // 2. Decrypt using crypto_service.decrypt_password(&id, &envelope_bytes)
+    // 3. Convert decrypted bytes to String
+    // 4. Return with auto-clear metadata
+    // 5. Audit log: PasswordRevealed { entry_id }
+
+    // Simulated decrypt flow (will be replaced with real DB access):
+    // let encrypted_bytes = VaultEntryRepo::get_encrypted_password(pool, &id).await?;
+    // let decrypted = crypto_service.decrypt_password(&id, &encrypted_bytes)?;
+    // let password_string = String::from_utf8(decrypted.plaintext)
+    //     .map_err(|_| KestrelError::Crypto("Password is not valid UTF-8".to_string()))?;
+
+    // TODO: Audit log: PasswordRevealed { entry_id }
+    tracing::warn!("Password reveal requested for entry: {}", id);
+
+    CommandResult::Err(CommandError::validation(
+        "Password reveal requires database integration",
+    ))
 }

@@ -24,6 +24,7 @@ pub mod envelope;
 pub mod kdf;
 pub mod key_management;
 pub mod random;
+pub mod vault_crypto;
 
 // Re-export key types for convenience
 pub use cipher::{decrypt, encrypt, AeadTag, Ciphertext, Nonce};
@@ -31,3 +32,4 @@ pub use envelope::{AadContext, EncryptedEnvelope, EnvelopeVersion, seal_envelope
 pub use kdf::{derive_key, DerivedKey, Salt};
 pub use key_management::MasterKey;
 pub use random::{random_bytes, random_nonce, random_salt, random_uuid};
+pub use vault_crypto::{VaultCryptoService, initialize_vault_crypto, unlock_vault_crypto};

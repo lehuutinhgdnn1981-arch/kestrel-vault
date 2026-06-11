@@ -34,6 +34,21 @@ pub struct MasterKey {
     key: Secret<DerivedKey>,
 }
 
+impl Clone for MasterKey {
+    /// Clones the master key by cloning the inner derived key.
+    ///
+    /// # Security
+    ///
+    /// Each clone holds its own copy of the key material, which will
+    /// be independently zeroized on drop. Minimize the number of
+    /// clones to reduce the attack surface for memory extraction.
+    fn clone(&self) -> Self {
+        MasterKey {
+            key: Secret::new(self.key.expose_secret().clone()),
+        }
+    }
+}
+
 impl MasterKey {
     /// Derives a master key from a password and salt.
     ///
