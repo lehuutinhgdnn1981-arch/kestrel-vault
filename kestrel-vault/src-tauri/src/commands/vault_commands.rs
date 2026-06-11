@@ -38,15 +38,9 @@ use crate::commands::types::{
     PasswordRevealResponse, VaultEntryResponse,
     MAX_NOTES_LEN, MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
 };
-use crate::crypto::keywrap::DataEncryptionKey;
-use crate::crypto::secure_string::SecureString;
-use crate::crypto::vault_crypto::{VaultCryptoService, field_names};
-use crate::db::vault_entry_repo::{VaultEntryRepo, CreateVaultEntryRequest};
-use crate::security::vault_state::VaultState;
 use crate::vault::entry::CreateEntryRequest;
 use crate::vault::service::VaultServiceImpl;
 use tauri::State;
-use zeroize::Zeroize;
 
 use super::auth_commands::AppState;
 
@@ -255,6 +249,7 @@ pub fn vault_get_entry(
 /// - Password is converted to SecureString for zeroization
 /// - Field encryption uses the DEK
 /// - Activity is recorded to extend the session
+/// - All modifications are audit-logged
 ///
 /// # Errors
 ///
@@ -291,6 +286,11 @@ pub fn vault_update_entry(
                 "Password cannot be empty",
             ));
         }
+        if p.len() > 1024 {
+            return CommandResult::Err(CommandError::validation(
+                "Password must be at most 1024 characters",
+            ));
+        }
     }
     if let Some(ref u) = url {
         validate_field(u, MAX_URL_LEN, "URL")?;
@@ -298,50 +298,49 @@ pub fn vault_update_entry(
     if let Some(ref n) = notes {
         validate_field(n, MAX_NOTES_LEN, "Notes")?;
     }
+    if let Some(ref fid) = folder_id {
+        validate_uuid(fid, "folder_id")?;
+    }
+    if let Some(ref tag_list) = tags {
+        for tag in tag_list {
+            validate_field(tag, 64, "Tag")?;
+        }
+    }
 
-    // ── Get DEK for re-encryption ──
+    // ── Get DEK for field-level encryption ──
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let crypto_service = VaultCryptoService::new_dek(&dek);
 
-    // ── Re-encrypt changed sensitive fields using DEK ──
-    if let Some(ref new_password) = password {
-        let secure_password = SecureString::from(new_password.clone());
-        let encrypted = crypto_service.encrypt_field(&id, field_names::PASSWORD, secure_password.as_bytes());
-        // secure_password is zeroized when it goes out of scope
-        match encrypted {
-            Ok(enc) => {
-                // TODO: Update encrypted_password in database with enc.envelope_bytes
-                let _ = enc; // Use when DB is wired
-            }
-            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-        }
-    }
+    // ── Get database pool ──
+    let db = state.get_db().ok_or_else(|| {
+        CommandError::unauthorized("Database not available")
+    })?;
+    let pool = db.pool();
 
-    if let Some(ref new_url) = url {
-        if !new_url.is_empty() {
-            match crypto_service.encrypt_field(&id, field_names::URL, new_url.as_bytes()) {
-                Ok(enc) => {
-                    // TODO: Update encrypted_url in database with enc.envelope_bytes
-                    let _ = enc;
-                }
-                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-            }
-        }
-    }
+    // ── Use VaultServiceImpl to update entry ──
+    let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
+        CommandError::validation("Invalid entry UUID")
+    })?;
 
-    if let Some(ref new_notes) = notes {
-        match crypto_service.encrypt_field(&id, field_names::NOTES, new_notes.as_bytes()) {
-            Ok(enc) => {
-                // TODO: Update encrypted_notes in database with enc.envelope_bytes
-                let _ = enc;
-            }
-            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
-        }
-    }
+    let update_request = crate::vault::entry::UpdateEntryRequest {
+        title,
+        username,
+        password,
+        url,
+        notes,
+        folder_id: folder_id.map(|fid| {
+            uuid::Uuid::parse_str(&fid).ok()
+        }),
+        tags,
+    };
 
-    // ── Record activity ──
+    let service = VaultServiceImpl::new(&dek, pool);
+    let entry = crate::commands::async_runtime::block_on(async {
+        service.update_entry(entry_id, update_request).await
+    }).map_err(CommandError::from_kestrel)?;
+
+    // ── Record activity (extends auto-lock timer) ──
     {
         let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
             tracing::error!("Vault state machine lock poisoned: {}", e);
@@ -350,11 +349,19 @@ pub fn vault_update_entry(
         sm.record_activity();
     }
 
-    // TODO: Load existing entry from database
-    // TODO: Update in database
-    // TODO: Audit log: EntryUpdated { entry_id, changed_fields }
+    tracing::info!("Vault entry updated: id={}", entry.id);
 
-    CommandResult::Err(CommandError::validation("Not yet implemented"))
+    CommandResult::ok(VaultEntryResponse {
+        id: entry.id.to_string(),
+        title: entry.title,
+        username: entry.username,
+        url: None, // URL is encrypted — frontend doesn't get it from update
+        folder_id: entry.folder_id.map(|u| u.to_string()),
+        has_totp: entry.has_totp(),
+        notes_preview: None, // Notes are encrypted
+        created_at: entry.created_at.to_rfc3339(),
+        updated_at: entry.updated_at.to_rfc3339(),
+    })
 }
 
 /// Deletes a vault entry.
