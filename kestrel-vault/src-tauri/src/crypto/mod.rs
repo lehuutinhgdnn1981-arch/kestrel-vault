@@ -18,12 +18,14 @@
 //! - `cipher`: Authenticated encryption (AES-256-GCM)
 //! - `key_management`: Master key handling, rotation, and derivation
 //! - `random`: Secure random number generation
+//! - `secure_string`: Zeroizing string wrapper for password handling
 
 pub mod cipher;
 pub mod envelope;
 pub mod kdf;
 pub mod key_management;
 pub mod random;
+pub mod secure_string;
 pub mod vault_crypto;
 
 // Re-export key types for convenience
@@ -32,4 +34,5 @@ pub use envelope::{AadContext, EncryptedEnvelope, EnvelopeVersion, seal_envelope
 pub use kdf::{derive_key, DerivedKey, Salt};
 pub use key_management::MasterKey;
 pub use random::{random_bytes, random_nonce, random_salt, random_uuid};
+pub use secure_string::SecureString;
 pub use vault_crypto::{VaultCryptoService, initialize_vault_crypto, unlock_vault_crypto};

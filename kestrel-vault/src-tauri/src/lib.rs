@@ -66,6 +66,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::auth_commands::auth_is_vault_initialized,
             commands::auth_commands::auth_change_password,
             commands::auth_commands::auth_get_vault_status,
+            commands::auth_commands::auth_auto_lock_check,
             // Vault commands
             commands::vault_commands::vault_create_entry,
             commands::vault_commands::vault_get_entry,

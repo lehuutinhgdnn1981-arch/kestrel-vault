@@ -7,9 +7,11 @@
 //! # Security
 //!
 //! - Vault must be unlocked for all operations
+//! - Auto-lock is checked before every operation
 //! - Passwords are ONLY returned via `vault_reveal_password`
 //! - All modifications are audit-logged
 //! - All inputs are validated
+//! - Password strings use SecureString for zeroization
 //!
 //! # IPC Contract
 //!
@@ -28,10 +30,10 @@ use crate::commands::types::{
     PasswordRevealResponse, VaultEntryResponse,
     MAX_NOTES_LEN, MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
 };
+use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::VaultCryptoService;
 #[allow(unused_imports)]
 use crate::crypto::vault_crypto::field_names;
-#[allow(unused_imports)]
 use crate::security::vault_state::VaultState;
 use tauri::State;
 use zeroize::Zeroize;
@@ -52,9 +54,15 @@ const DEFAULT_AUTO_CLEAR_SECONDS: u32 = 30;
 /// - **Required state**: Unlocked
 /// - **Effect**: Creates encrypted entry in database
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Password is converted to SecureString for zeroization
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 /// - `VALIDATION_ERROR`: Invalid input fields
 #[tauri::command]
 pub fn vault_create_entry(
@@ -69,6 +77,9 @@ pub fn vault_create_entry(
 ) -> CommandResult<VaultEntryResponse> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     // Validate inputs
     validate_field(&title, MAX_TITLE_LEN, "Title")?;
@@ -102,11 +113,11 @@ pub fn vault_create_entry(
     let entry_id = uuid::Uuid::new_v4().to_string();
     let crypto_service = VaultCryptoService::new(&master_key);
 
-    // ── Encrypt sensitive fields ──
+    // ── Encrypt sensitive fields using SecureString ──
     let encrypted_password = {
-        let mut password_bytes = password.as_bytes().to_vec();
-        let result = crypto_service.encrypt_password(&entry_id, &password_bytes);
-        password_bytes.zeroize();
+        let secure_password = SecureString::from(password);
+        let result = crypto_service.encrypt_password(&entry_id, secure_password.as_bytes());
+        // secure_password is zeroized when it goes out of scope
         match result {
             Ok(enc) => enc.envelope_bytes,
             Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
@@ -131,7 +142,7 @@ pub fn vault_create_entry(
     // for search), url (encrypted for privacy), folder_id, tags (encrypted
     // for privacy), created_at, updated_at
 
-    // ── Record activity ──
+    // ── Record activity (extends auto-lock timer) ──
     {
         let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
             tracing::error!("Vault state machine lock poisoned: {}", e);
@@ -141,7 +152,6 @@ pub fn vault_create_entry(
     }
 
     // TODO: Audit log: EntryCreated { entry_id }
-    // TODO: Zeroize password String
 
     tracing::info!("Vault entry created: id={}", entry_id);
 
@@ -170,9 +180,14 @@ pub fn vault_create_entry(
 /// - **Required state**: Unlocked
 /// - **Effect**: Read-only
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 /// - `VALIDATION_ERROR`: Invalid UUID
 #[tauri::command]
 pub fn vault_get_entry(
@@ -181,6 +196,9 @@ pub fn vault_get_entry(
 ) -> CommandResult<VaultEntryResponse> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     validate_uuid(&id, "id")?;
 
@@ -209,9 +227,15 @@ pub fn vault_get_entry(
 /// - **Required state**: Unlocked
 /// - **Effect**: Re-encrypt changed fields, update database
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Password is converted to SecureString for zeroization
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 /// - `VALIDATION_ERROR`: Invalid input fields
 #[tauri::command]
 pub fn vault_update_entry(
@@ -227,6 +251,9 @@ pub fn vault_update_entry(
 ) -> CommandResult<VaultEntryResponse> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     validate_uuid(&id, "id")?;
     if let Some(ref t) = title {
@@ -255,11 +282,11 @@ pub fn vault_update_entry(
     })?;
     let crypto_service = VaultCryptoService::new(&master_key);
 
-    // ── Re-encrypt changed sensitive fields ──
+    // ── Re-encrypt changed sensitive fields using SecureString ──
     if let Some(ref new_password) = password {
-        let mut password_bytes = new_password.as_bytes().to_vec();
-        let encrypted = crypto_service.encrypt_password(&id, &password_bytes);
-        password_bytes.zeroize();
+        let secure_password = SecureString::from(new_password.clone());
+        let encrypted = crypto_service.encrypt_password(&id, secure_password.as_bytes());
+        // secure_password is zeroized when it goes out of scope
         match encrypted {
             Ok(enc) => {
                 // TODO: Update encrypted_password in database with enc.envelope_bytes
@@ -293,7 +320,6 @@ pub fn vault_update_entry(
     // TODO: Load existing entry from database
     // TODO: Update in database
     // TODO: Audit log: EntryUpdated { entry_id, changed_fields }
-    // TODO: Zeroize any plaintext passwords
 
     CommandResult::Err(CommandError::validation("Not yet implemented"))
 }
@@ -307,9 +333,14 @@ pub fn vault_update_entry(
 /// - **Required state**: Unlocked
 /// - **Effect**: Permanent deletion
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 /// - `VALIDATION_ERROR`: Invalid UUID or missing confirmation
 #[tauri::command]
 pub fn vault_delete_entry(
@@ -319,6 +350,9 @@ pub fn vault_delete_entry(
 ) -> CommandResult<()> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     validate_uuid(&id, "id")?;
     if !confirm {
@@ -353,9 +387,14 @@ pub fn vault_delete_entry(
 /// - **Required state**: Unlocked
 /// - **Effect**: Read-only
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 #[tauri::command]
 pub fn vault_list_entries(
     folder_id: Option<String>,
@@ -365,6 +404,9 @@ pub fn vault_list_entries(
 ) -> CommandResult<Vec<VaultEntryResponse>> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     if let Some(ref fid) = folder_id {
         validate_uuid(fid, "folder_id")?;
@@ -396,9 +438,14 @@ pub fn vault_list_entries(
 /// - **Required state**: Unlocked
 /// - **Effect**: Read-only
 ///
+/// # Security
+///
+/// - Auto-lock is checked before the operation
+/// - Activity is recorded to extend the session
+///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 /// - `VALIDATION_ERROR`: Query too long
 #[tauri::command]
 pub fn vault_search_entries(
@@ -408,6 +455,9 @@ pub fn vault_search_entries(
 ) -> CommandResult<Vec<VaultEntryResponse>> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     validate_field(&query, 256, "Query")?;
     let _limit = limit.unwrap_or(50).min(200);
@@ -438,13 +488,16 @@ pub fn vault_search_entries(
 ///
 /// # Security
 ///
+/// - Auto-lock is checked before the operation
 /// - Audit-logged (who revealed what and when)
 /// - Auto-clear metadata included in response
 /// - Should only be called on explicit user action
+/// - Decrypted password is returned as a string that the frontend
+///   must clear after the auto-clear timeout
 ///
 /// # Errors
 ///
-/// - `UNAUTHORIZED`: Vault is locked
+/// - `UNAUTHORIZED`: Vault is locked or session expired
 #[tauri::command]
 pub fn vault_reveal_password(
     id: String,
@@ -452,6 +505,9 @@ pub fn vault_reveal_password(
 ) -> CommandResult<PasswordRevealResponse> {
     // Guard: vault must be unlocked
     state.require_unlocked()?;
+
+    // Guard: check session validity / auto-lock
+    state.validate_session()?;
 
     validate_uuid(&id, "id")?;
 
@@ -471,15 +527,14 @@ pub fn vault_reveal_password(
     }
 
     // TODO: Load encrypted password envelope bytes from database via VaultEntryRepo
-    // For now, we simulate the flow:
+    // The decryption flow:
     //
     // 1. Load encrypted_password BLOB from database for the given entry_id
     // 2. Decrypt using crypto_service.decrypt_password(&id, &envelope_bytes)
     // 3. Convert decrypted bytes to String
     // 4. Return with auto-clear metadata
     // 5. Audit log: PasswordRevealed { entry_id }
-
-    // Simulated decrypt flow (will be replaced with real DB access):
+    //
     // let encrypted_bytes = VaultEntryRepo::get_encrypted_password(pool, &id).await?;
     // let decrypted = crypto_service.decrypt_password(&id, &encrypted_bytes)?;
     // let password_string = String::from_utf8(decrypted.plaintext)

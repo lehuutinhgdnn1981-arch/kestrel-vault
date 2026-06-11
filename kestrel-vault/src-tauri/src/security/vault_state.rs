@@ -348,6 +348,9 @@ impl VaultStateMachine {
     /// that the transition is legal from the current state, checks
     /// guards, applies the transition, and emits audit events.
     ///
+    /// Rejected transitions emit a `TransitionRejected` event to the
+    /// pending events queue for audit logging.
+    ///
     /// # Arguments
     ///
     /// * `transition` - The transition to attempt
@@ -365,7 +368,14 @@ impl VaultStateMachine {
         let from_state = self.state;
 
         // Validate that the transition is legal from the current state
-        let to_state = self.validate_transition(from_state, transition, context)?;
+        let to_state = match self.validate_transition(from_state, transition, context) {
+            Ok(state) => state,
+            Err(e) => {
+                // Emit rejection event for audit logging
+                self.emit_rejection(from_state, transition, &e.to_string());
+                return Err(e);
+            }
+        };
 
         // Apply the transition
         self.state = to_state;
@@ -458,6 +468,11 @@ impl VaultStateMachine {
     /// 2. Any guards are satisfied
     ///
     /// Returns the target state on success, or an error.
+    ///
+    /// Note: This method does NOT emit rejection events. The caller
+    /// (`transition()`) is responsible for emitting events when
+    /// validation fails. This allows `can_transition()` to perform
+    /// read-only checks without side effects.
     fn validate_transition(
         &self,
         from: VaultState,
@@ -499,7 +514,6 @@ impl VaultStateMachine {
                 // The confirmation token is validated in the command
                 // handler, but we check that the context has one
                 if context.destroy_confirmation.is_none() {
-                    self.emit_rejection(from, transition, "Destroy requires a confirmation token");
                     return Err(KestrelError::Unauthorized(
                         "Vault destruction requires confirmation".to_string(),
                     ));
@@ -509,12 +523,10 @@ impl VaultStateMachine {
 
             // All other combinations are invalid
             _ => {
-                let reason = format!(
+                Err(KestrelError::Unauthorized(format!(
                     "Transition {} is not valid from state {}",
                     transition, from
-                );
-                self.emit_rejection(from, transition, &reason);
-                Err(KestrelError::Unauthorized(reason))
+                )))
             }
         }
     }
@@ -524,18 +536,22 @@ impl VaultStateMachine {
     /// This is a helper for recording rejected transitions in
     /// the audit log — important for detecting tampering or
     /// unauthorized access attempts.
+    ///
+    /// Note: We need `&mut self` to push the event into `pending_events`.
+    /// The immutable `&self` in the signature was a bug — rejected events
+    /// were created but never stored, causing them to be silently dropped.
     fn emit_rejection(
-        &self,
+        &mut self,
         current_state: VaultState,
         attempted_transition: VaultTransition,
         reason: &str,
-    ) -> VaultStateEvent {
-        VaultStateEvent::TransitionRejected {
+    ) {
+        self.pending_events.push(VaultStateEvent::TransitionRejected {
             current_state,
             attempted_transition,
             reason: reason.to_string(),
             timestamp: Utc::now(),
-        }
+        });
     }
 
     /// Checks if auto-lock should trigger based on the given timeout.
@@ -895,6 +911,57 @@ mod tests {
         assert_eq!(first.len(), 1);
         let second = sm.drain_events();
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn rejected_transition_emits_rejection_event() {
+        let mut sm = VaultStateMachine::new();
+        // Unlock from Uninitialized is invalid
+        let result = sm.transition(VaultTransition::Unlock, &test_context());
+        assert!(result.is_err());
+
+        // The rejection event should now be in pending_events
+        let events = sm.drain_events();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], VaultStateEvent::TransitionRejected { .. }));
+
+        // Verify the event details
+        match &events[0] {
+            VaultStateEvent::TransitionRejected {
+                current_state,
+                attempted_transition,
+                reason,
+                ..
+            } => {
+                assert_eq!(*current_state, VaultState::Uninitialized);
+                assert_eq!(*attempted_transition, VaultTransition::Unlock);
+                assert!(reason.contains("not valid"));
+            }
+            _ => panic!("Expected TransitionRejected event"),
+        }
+    }
+
+    #[test]
+    fn destroy_without_confirmation_emits_rejection_event() {
+        let mut sm = VaultStateMachine::from_state(VaultState::Locked);
+        let ctx = test_context(); // No destroy_confirmation
+        let result = sm.transition(VaultTransition::Destroy, &ctx);
+        assert!(result.is_err());
+
+        let events = sm.drain_events();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], VaultStateEvent::TransitionRejected { .. }));
+    }
+
+    #[test]
+    fn can_transition_does_not_emit_events() {
+        let mut sm = VaultStateMachine::new();
+        // can_transition is read-only and should NOT emit events
+        assert!(!sm.can_transition(VaultTransition::Unlock, &test_context()));
+
+        // No events should be pending
+        let events = sm.drain_events();
+        assert!(events.is_empty());
     }
 
     // ── can_transition tests ──

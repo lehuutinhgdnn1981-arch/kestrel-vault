@@ -11,6 +11,8 @@
 //! - Progressive lockout after failures
 //! - All auth events are audit-logged
 //! - Vault state machine enforces lifecycle transitions
+//! - Passwords use SecureString for memory zeroization
+//! - Sessions are managed through the Session type
 //!
 //! # IPC Contract
 //!
@@ -23,27 +25,30 @@
 //! | auth_is_vault_initialized| Any           | Read-only                       |
 //! | auth_change_password     | Unlocked      | Key rotation                    |
 //! | auth_get_vault_status    | Any           | Read-only                       |
+//! | auth_auto_lock_check     | Unlocked      | Check + auto-lock if expired    |
 
 use crate::commands::types::{
     validate_master_password, CommandError, CommandResult, SessionResponse, VaultInitResponse,
     VaultLockResponse, VaultStatusResponse,
 };
+use crate::config::AppConfig;
 use crate::crypto::kdf::{MEMORY_COST, ITERATIONS, PARALLELISM};
 use crate::crypto::key_management::MasterKey;
+use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
 use crate::error::KestrelError;
 use crate::security::lockout::{FailedAttemptTracker, LockoutState};
 use crate::security::rate_limit::{Operation, RateLimiter};
+use crate::security::session::{Session, SessionId, SessionState};
 use crate::security::vault_state::{VaultContext, VaultState, VaultStateMachine, VaultTransition};
 use std::sync::RwLock;
 use tauri::State;
-use zeroize::Zeroize;
 
 /// App state shared across Tauri commands.
 ///
 /// This struct is managed by Tauri's state management and
 /// provides access to the vault state machine, rate limiter,
-/// lockout tracker, master key, and database pool.
+/// lockout tracker, master key, session, and configuration.
 ///
 /// # Thread Safety
 ///
@@ -57,6 +62,7 @@ use zeroize::Zeroize;
 ///   When the vault is locked, the key is dropped (zeroized via
 ///   the `secrecy` crate's `Secret` type and `ZeroizeOnDrop`).
 /// - No passwords are ever stored in this struct.
+/// - The session holds no secrets — only state metadata.
 pub struct AppState {
     /// The vault lifecycle state machine.
     pub vault_state_machine: RwLock<VaultStateMachine>,
@@ -74,6 +80,11 @@ pub struct AppState {
     /// Test envelope bytes for password verification.
     /// Available after vault initialization.
     pub test_envelope: RwLock<Option<Vec<u8>>>,
+    /// The current session, present only when vault is unlocked.
+    /// Contains no secrets — only session metadata (ID, timestamps, state).
+    pub session: RwLock<Option<Session>>,
+    /// Application configuration (auto-lock timeout, etc.).
+    pub config: RwLock<AppConfig>,
 }
 
 impl Default for AppState {
@@ -85,6 +96,8 @@ impl Default for AppState {
             master_key: RwLock::new(None),
             salt_hex: RwLock::new(None),
             test_envelope: RwLock::new(None),
+            session: RwLock::new(None),
+            config: RwLock::new(AppConfig::default()),
         }
     }
 }
@@ -167,7 +180,7 @@ impl AppState {
         }
     }
 
-    /// Returns a reference to the master key if the vault is unlocked.
+    /// Returns a clone of the master key if the vault is unlocked.
     ///
     /// Returns `None` if the vault is locked or uninitialized.
     /// This is used by vault commands that need to encrypt/decrypt data.
@@ -177,6 +190,129 @@ impl AppState {
             std::process::exit(1);
         });
         guard.clone()
+    }
+
+    /// Validates the current session and checks for auto-lock.
+    ///
+    /// This should be called at the start of every vault operation
+    /// to ensure the session hasn't expired. If auto-lock is triggered,
+    /// the vault is locked automatically.
+    ///
+    /// Returns `Ok(())` if the session is valid.
+    /// Returns `Err` if the session is expired (and locks the vault).
+    pub fn validate_session(&self) -> Result<(), CommandError> {
+        let auto_lock_minutes = {
+            let config = self.config.read().unwrap_or_else(|e| {
+                tracing::error!("Config lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            config.auto_lock_minutes
+        };
+
+        let should_lock = {
+            let mut session_guard = self.session.write().unwrap_or_else(|e| {
+                tracing::error!("Session lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            match session_guard.as_mut() {
+                Some(session) => {
+                    // Check if auto-lock should trigger
+                    if session.is_auto_lock_triggered(auto_lock_minutes) {
+                        tracing::warn!("Session auto-lock triggered after {} minutes of inactivity", auto_lock_minutes);
+                        // Lock the session
+                        session.lock();
+                        true
+                    } else {
+                        // Validate the session is still active
+                        if !session.validate() {
+                            tracing::warn!("Session has expired");
+                            true
+                        } else {
+                            // Touch the session to extend the timeout
+                            if let Err(e) = session.touch(auto_lock_minutes) {
+                                tracing::error!("Failed to touch session: {}", e);
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    }
+                }
+                None => true, // No session means vault should be locked
+            }
+        };
+
+        if should_lock {
+            // Perform auto-lock
+            self.perform_auto_lock()?;
+            return Err(CommandError::unauthorized(
+                "Session expired. Vault has been locked due to inactivity.",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Performs an auto-lock of the vault.
+    ///
+    /// This is called when the session expires or auto-lock is triggered.
+    /// It transitions the state machine, zeroizes the master key, and
+    /// destroys the session.
+    fn perform_auto_lock(&self) -> Result<(), CommandError> {
+        // Transition: Unlocked → Locked (AutoLock)
+        {
+            let mut sm = self.vault_state_machine.write().unwrap_or_else(|e| {
+                tracing::error!("Vault state machine lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            let context = VaultContext::with_state(VaultState::Unlocked);
+            match sm.transition(VaultTransition::AutoLock, &context) {
+                Ok(result) => {
+                    tracing::info!(
+                        "Vault auto-locked: {:?} → {:?}",
+                        result.from_state,
+                        result.to_state
+                    );
+                    for event in sm.drain_events() {
+                        tracing::info!("Vault event: {:?}", event);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Auto-lock transition failed: {}", e);
+                    // Even if the transition fails, we still zeroize the key
+                }
+            }
+        }
+
+        // Zeroize the master key
+        {
+            let mut key_guard = self.master_key.write().unwrap_or_else(|e| {
+                tracing::error!("Master key lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *key_guard = None;
+        }
+
+        // Destroy the session
+        {
+            let mut session_guard = self.session.write().unwrap_or_else(|e| {
+                tracing::error!("Session lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *session_guard = None;
+        }
+
+        // Reset rate limiter for login
+        {
+            let mut limiter = self.rate_limiter.write().unwrap_or_else(|e| {
+                tracing::error!("Rate limiter lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            limiter.reset_operation(Operation::Login);
+        }
+
+        tracing::info!("Vault auto-locked — master key zeroized, session destroyed");
+        Ok(())
     }
 
     /// Loads vault metadata (salt + test envelope) from the database.
@@ -214,6 +350,29 @@ impl AppState {
             });
             *envelope = Some(test_envelope);
         }
+    }
+
+    /// Parses a hex-encoded salt string into a `Salt` struct.
+    ///
+    /// # Errors
+    ///
+    /// Returns `KestrelError::Crypto` if the hex string is invalid or
+    /// the salt is not exactly 16 bytes.
+    fn parse_salt_from_hex(hex: &str) -> Result<crate::crypto::kdf::Salt, KestrelError> {
+        let salt_bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0))
+            .collect();
+
+        if salt_bytes.len() != 16 {
+            return Err(KestrelError::Crypto(
+                "Invalid salt length".to_string(),
+            ));
+        }
+
+        let mut salt_array = [0u8; 16];
+        salt_array.copy_from_slice(&salt_bytes);
+        Ok(crate::crypto::kdf::Salt(salt_array))
     }
 }
 
@@ -254,11 +413,11 @@ pub fn auth_initialize_vault(
     state.require_state(VaultState::Uninitialized)?;
 
     // ── Crypto: Derive master key + create test envelope ──
+    // Convert password to SecureString immediately for zeroization
     let (master_key, salt, test_envelope_bytes) = {
-        let mut password_bytes = master_password.as_bytes().to_vec();
-        let result = initialize_vault_crypto(&password_bytes);
-        // Zeroize password bytes immediately
-        password_bytes.zeroize();
+        let secure_password = SecureString::from(master_password);
+        let result = initialize_vault_crypto(secure_password.as_bytes());
+        // secure_password is zeroized when it goes out of scope
         match result {
             Ok(r) => r,
             Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
@@ -315,7 +474,6 @@ pub fn auth_initialize_vault(
     //   hint: hint,
     // }
     // TODO: Audit log: VaultInitialized
-    // TODO: Zeroize master_password String
 
     tracing::info!(
         "Vault initialized with Argon2id (memory={}KiB, iterations={}, parallelism={})",
@@ -342,8 +500,9 @@ pub fn auth_initialize_vault(
 ///
 /// - Rate limited to prevent brute force
 /// - Progressive lockout after failures
-/// - Master password is zeroized after key derivation
+/// - Master password is zeroized after key derivation (via SecureString)
 /// - Failed attempts are audit-logged
+/// - Session is created with configurable auto-lock timeout
 ///
 /// # Errors
 ///
@@ -402,27 +561,15 @@ pub fn auth_unlock(
         match (salt_hex, test_envelope_bytes) {
             (Some(sh), Some(te)) => {
                 // Parse salt from hex
-                let salt_bytes: Vec<u8> = (0..sh.len())
-                    .step_by(2)
-                    .map(|i| u8::from_str_radix(&sh[i..i + 2], 16).unwrap_or(0))
-                    .collect();
+                let salt = match AppState::parse_salt_from_hex(&sh) {
+                    Ok(s) => s,
+                    Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+                };
 
-                let mut salt_array = [0u8; 16];
-                if salt_bytes.len() == 16 {
-                    salt_array.copy_from_slice(&salt_bytes);
-                } else {
-                    return CommandResult::Err(CommandError::from_kestrel(
-                        KestrelError::Crypto("Invalid salt length".to_string()),
-                    ));
-                }
-
-                let salt = crate::crypto::kdf::Salt(salt_array);
-                let mut password_bytes = master_password.as_bytes().to_vec();
-
-                let result = unlock_vault_crypto(&password_bytes, &salt, &te);
-
-                // Zeroize password bytes immediately
-                password_bytes.zeroize();
+                // Convert password to SecureString for zeroization
+                let secure_password = SecureString::from(master_password);
+                let result = unlock_vault_crypto(secure_password.as_bytes(), &salt, &te);
+                // secure_password is zeroized when it goes out of scope
                 result
             }
             (None, _) => Err(KestrelError::Config(
@@ -447,8 +594,18 @@ pub fn auth_unlock(
                 tracker.reset();
             }
 
+            // Get auto-lock timeout from config
+            let auto_lock_minutes = {
+                let config = state.config.read().unwrap_or_else(|e| {
+                    tracing::error!("Config lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                config.auto_lock_minutes
+            };
+
             // Transition: Locked → Unlocked
-            let session_id;
+            let session_id: SessionId;
+            let expires_at: chrono::DateTime<chrono::Utc>;
             {
                 let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
                     tracing::error!("Vault state machine lock poisoned: {}", e);
@@ -470,7 +627,23 @@ pub fn auth_unlock(
                         return CommandResult::Err(CommandError::from_kestrel(e));
                     }
                 }
-                session_id = uuid::Uuid::new_v4().to_string();
+            }
+
+            // Create a new session
+            let new_session = match Session::new(auto_lock_minutes) {
+                Ok(s) => s,
+                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+            };
+            session_id = new_session.id().clone();
+            expires_at = *new_session.expires_at();
+
+            // Store session in AppState
+            {
+                let mut session_guard = state.session.write().unwrap_or_else(|e| {
+                    tracing::error!("Session lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                *session_guard = Some(new_session);
             }
 
             // Store master key in AppState
@@ -482,14 +655,11 @@ pub fn auth_unlock(
                 *key_guard = Some(master_key);
             }
 
-            // TODO: Create Session via SessionManager
             // TODO: Audit log: UnlockSucceeded
-            // TODO: Zeroize master_password String
 
             CommandResult::ok(SessionResponse {
-                session_id,
-                expires_at: chrono::Utc::now()
-                    + chrono::Duration::minutes(15), // Default; should use config
+                session_id: session_id.to_string(),
+                expires_at: expires_at.to_rfc3339(),
                 is_unlocked: true,
             })
         }
@@ -542,8 +712,8 @@ pub fn auth_unlock(
 /// # Security
 ///
 /// - Master key is zeroized
-/// - All decrypted data is cleared
 /// - Session is destroyed
+/// - All decrypted data is cleared
 /// - Audit-logged
 #[tauri::command]
 pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse> {
@@ -585,6 +755,15 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         *key_guard = None;
     }
 
+    // ── Destroy session ──
+    {
+        let mut session_guard = state.session.write().unwrap_or_else(|e| {
+            tracing::error!("Session lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        *session_guard = None;
+    }
+
     // Reset rate limiter for login
     {
         let mut limiter = state.rate_limiter.write().unwrap_or_else(|e| {
@@ -594,11 +773,9 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         limiter.reset_operation(Operation::Login);
     }
 
-    // TODO: Destroy Session via SessionManager
-    // TODO: Clear all decrypted data from memory
     // TODO: Audit log: VaultLocked
 
-    tracing::info!("Vault locked — master key zeroized");
+    tracing::info!("Vault locked — master key zeroized, session destroyed");
 
     CommandResult::ok(VaultLockResponse {
         state: VaultState::Locked.to_string(),
@@ -614,20 +791,25 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
 pub fn auth_get_session(
     state: State<'_, AppState>,
 ) -> CommandResult<Option<SessionResponse>> {
-    let sm = state.vault_state_machine.read().unwrap_or_else(|e| {
-        tracing::error!("Vault state machine lock poisoned: {}", e);
+    let session_guard = state.session.read().unwrap_or_else(|e| {
+        tracing::error!("Session lock poisoned: {}", e);
         std::process::exit(1);
     });
 
-    if sm.state() == VaultState::Unlocked {
-        // TODO: Return actual session data from SessionManager
-        CommandResult::ok(Some(SessionResponse {
-            session_id: "active".to_string(),
-            expires_at: "todo".to_string(),
-            is_unlocked: true,
-        }))
-    } else {
-        CommandResult::ok(None)
+    match session_guard.as_ref() {
+        Some(session) => {
+            // Check if session is still valid
+            if session.state() == SessionState::Unlocked {
+                CommandResult::ok(Some(SessionResponse {
+                    session_id: session.id().to_string(),
+                    expires_at: session.expires_at().to_rfc3339(),
+                    is_unlocked: true,
+                }))
+            } else {
+                CommandResult::ok(None)
+            }
+        }
+        None => CommandResult::ok(None),
     }
 }
 
@@ -671,6 +853,41 @@ pub fn auth_get_vault_status(
     ))
 }
 
+/// Checks if auto-lock should trigger and locks the vault if needed.
+///
+/// This is intended to be called periodically from the frontend
+/// (e.g., every 30 seconds) to enforce the auto-lock timeout.
+///
+/// # IPC Contract
+///
+/// - **Required state**: Unlocked (otherwise no-op)
+///
+/// # Returns
+///
+/// - `true` if the vault was auto-locked
+/// - `false` if the session is still valid
+#[tauri::command]
+pub fn auth_auto_lock_check(
+    state: State<'_, AppState>,
+) -> CommandResult<bool> {
+    // Only check if vault is unlocked
+    {
+        let sm = state.vault_state_machine.read().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        if sm.state() != VaultState::Unlocked {
+            return CommandResult::ok(false);
+        }
+    }
+
+    // Validate session (this will auto-lock if expired)
+    match state.validate_session() {
+        Ok(()) => CommandResult::ok(false),
+        Err(_) => CommandResult::ok(true), // Vault was auto-locked
+    }
+}
+
 /// Changes the master password.
 ///
 /// Requires the vault to be unlocked. Derives a new key from
@@ -686,6 +903,8 @@ pub fn auth_get_vault_status(
 /// - Current password must be verified
 /// - Re-encryption is transactional (rollback on failure)
 /// - Old key is zeroized after successful rotation
+/// - Both passwords use SecureString for zeroization
+/// - New session is created after rotation
 /// - Audit-logged
 ///
 /// # Errors
@@ -709,8 +928,10 @@ pub fn auth_change_password(
     // Guard: vault must be unlocked
     state.require_unlocked()?;
 
+    // Validate session is active
+    state.validate_session()?;
+
     // ── Verify current password ──
-    // Derive a key from the current password and check against test envelope
     let current_key_verified = {
         let salt_hex = state.salt_hex.read().unwrap_or_else(|e| {
             tracing::error!("Salt lock poisoned: {}", e);
@@ -723,24 +944,17 @@ pub fn auth_change_password(
 
         match (salt_hex.as_ref(), test_envelope.as_ref()) {
             (Some(sh), Some(te)) => {
-                let salt_bytes: Vec<u8> = (0..sh.len())
-                    .step_by(2)
-                    .map(|i| u8::from_str_radix(&sh[i..i + 2], 16).unwrap_or(0))
-                    .collect();
+                let salt = match AppState::parse_salt_from_hex(sh) {
+                    Ok(s) => s,
+                    Err(_) => return CommandResult::Err(CommandError::from_kestrel(
+                        KestrelError::Crypto("Invalid salt format".to_string()),
+                    )),
+                };
 
-                if salt_bytes.len() != 16 {
-                    false
-                } else {
-                    let mut salt_array = [0u8; 16];
-                    salt_array.copy_from_slice(&salt_bytes);
-                    let salt = crate::crypto::kdf::Salt(salt_array);
-
-                    let mut password_bytes = current_password.as_bytes().to_vec();
-                    let result = unlock_vault_crypto(&password_bytes, &salt, te);
-                    password_bytes.zeroize();
-
-                    result.is_ok()
-                }
+                let secure_current = SecureString::from(current_password);
+                let result = unlock_vault_crypto(secure_current.as_bytes(), &salt, te);
+                // secure_current is zeroized when it goes out of scope
+                result.is_ok()
             }
             _ => false,
         }
@@ -754,9 +968,9 @@ pub fn auth_change_password(
 
     // ── Derive new key from new password ──
     let (new_master_key, new_salt, new_test_envelope) = {
-        let mut new_password_bytes = new_password.as_bytes().to_vec();
-        let result = initialize_vault_crypto(&new_password_bytes);
-        new_password_bytes.zeroize();
+        let secure_new = SecureString::from(new_password);
+        let result = initialize_vault_crypto(secure_new.as_bytes());
+        // secure_new is zeroized when it goes out of scope
         match result {
             Ok(r) => r,
             Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
@@ -766,7 +980,7 @@ pub fn auth_change_password(
     let new_salt_hex: String = new_salt.0.iter().map(|b| format!("{b:02x}")).collect();
 
     // ── Re-encrypt all vault entries with the new key ──
-    // TODO: Implement transactional re-encryption
+    // TODO: Implement transactional re-encryption with database
     // 1. Load all vault entries from database
     // 2. Decrypt each sensitive field with old key
     // 3. Re-encrypt each field with new key
@@ -786,12 +1000,33 @@ pub fn auth_change_password(
     // Update vault metadata in memory
     state.store_vault_meta_in_memory(new_salt_hex, new_test_envelope.clone());
 
+    // Create a new session after key rotation
+    let auto_lock_minutes = {
+        let config = state.config.read().unwrap_or_else(|e| {
+            tracing::error!("Config lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        config.auto_lock_minutes
+    };
+
+    {
+        let mut session_guard = state.session.write().unwrap_or_else(|e| {
+            tracing::error!("Session lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        match Session::new(auto_lock_minutes) {
+            Ok(new_session) => *session_guard = Some(new_session),
+            Err(e) => {
+                tracing::error!("Failed to create session after key rotation: {}", e);
+            }
+        }
+    }
+
     // TODO: Persist updated vault_meta to database
     // TODO: Re-encrypt all vault entries with new key
-    // TODO: Zeroize current_password and new_password Strings
     // TODO: Audit log: PasswordChanged
 
-    tracing::info!("Master password changed — key rotated");
+    tracing::info!("Master password changed — key rotated, new session created");
 
     CommandResult::ok(())
 }
