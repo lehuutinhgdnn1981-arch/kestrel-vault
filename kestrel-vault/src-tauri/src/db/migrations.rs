@@ -434,6 +434,196 @@ pub fn current_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
 }
 
+/// Runs a database integrity check using PRAGMA integrity_check.
+///
+/// This verifies the structural integrity of the database file,
+/// including B-tree consistency, page format, and index ordering.
+/// It does NOT verify data correctness — only structural integrity.
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the integrity check passes ("ok").
+/// Returns an error with details if any issues are found.
+pub async fn integrity_check(pool: &SqlitePool) -> Result<(), KestrelError> {
+    let result: (String,) = sqlx::query_as("PRAGMA integrity_check")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Integrity check query failed: {e}")))?;
+
+    if result.0 == "ok" {
+        Ok(())
+    } else {
+        Err(KestrelError::Database(format!(
+            "Database integrity check failed: {}",
+            result.0
+        )))
+    }
+}
+
+/// Checks foreign key constraints across all tables.
+///
+/// Returns a list of foreign key violations. An empty list
+/// means all foreign keys are valid.
+pub async fn check_foreign_keys(
+    pool: &SqlitePool,
+) -> Result<Vec<ForeignKeyViolation>, KestrelError> {
+    let rows: Vec<(String, i64, String, i64)> = sqlx::query_as(
+        "PRAGMA foreign_key_check"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| KestrelError::Database(format!("Foreign key check failed: {e}")))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(table, rowid, parent, fkid)| ForeignKeyViolation {
+            table,
+            rowid,
+            parent,
+            fk_index: fkid,
+        })
+        .collect())
+}
+
+/// Runs VACUUM to optimize the database.
+///
+/// This rebuilds the entire database file, removing fragmentation
+/// and reclaiming unused space. It requires exclusive access.
+///
+/// # Warning
+///
+/// This is a heavyweight operation. Do not run during normal operation.
+/// Use it during maintenance windows or after large deletions.
+pub async fn vacuum(pool: &SqlitePool) -> Result<(), KestrelError> {
+    sqlx::query("VACUUM")
+        .execute(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("VACUUM failed: {e}")))?;
+
+    tracing::info!("Database VACUUM completed");
+    Ok(())
+}
+
+/// Runs ANALYZE to update query planner statistics.
+///
+/// This helps SQLite choose better query plans, especially after
+/// significant data changes. Should be run periodically or after
+/// bulk imports.
+pub async fn analyze(pool: &SqlitePool) -> Result<(), KestrelError> {
+    sqlx::query("ANALYZE")
+        .execute(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("ANALYZE failed: {e}")))?;
+
+    tracing::info!("Database ANALYZE completed");
+    Ok(())
+}
+
+/// Returns database page statistics.
+///
+/// Useful for monitoring database size and planning maintenance.
+pub async fn page_stats(pool: &SqlitePool) -> Result<PageStats, KestrelError> {
+    let page_count: (i64,) = sqlx::query_as("PRAGMA page_count")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to get page count: {e}")))?;
+
+    let page_size: (i64,) = sqlx::query_as("PRAGMA page_size")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to get page size: {e}")))?;
+
+    let free_pages: (i64,) = sqlx::query_as("PRAGMA freelist_count")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| KestrelError::Database(format!("Failed to get free pages: {e}")))?;
+
+    Ok(PageStats {
+        total_pages: page_count.0,
+        page_size_bytes: page_size.0,
+        free_pages: free_pages.0,
+        used_pages: page_count.0 - free_pages.0,
+        total_size_bytes: page_count.0 * page_size.0,
+        free_size_bytes: free_pages.0 * page_size.0,
+    })
+}
+
+/// A foreign key constraint violation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ForeignKeyViolation {
+    /// The table containing the foreign key reference.
+    pub table: String,
+    /// The rowid of the row with the violation.
+    pub rowid: i64,
+    /// The parent table that is referenced.
+    pub parent: String,
+    /// The foreign key index within the table definition.
+    pub fk_index: i64,
+}
+
+/// Database page statistics.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PageStats {
+    /// Total number of pages in the database.
+    pub total_pages: i64,
+    /// Size of each page in bytes.
+    pub page_size_bytes: i64,
+    /// Number of free (unused) pages.
+    pub free_pages: i64,
+    /// Number of used pages.
+    pub used_pages: i64,
+    /// Total database size in bytes (total_pages * page_size).
+    pub total_size_bytes: i64,
+    /// Free space in bytes (free_pages * page_size).
+    pub free_size_bytes: i64,
+}
+
+impl PageStats {
+    /// Returns the fragmentation ratio (0.0 = no fragmentation, 1.0 = fully fragmented).
+    ///
+    /// A high fragmentation ratio indicates that VACUUM would
+    /// significantly reduce the database file size.
+    pub fn fragmentation_ratio(&self) -> f64 {
+        if self.total_pages == 0 {
+            return 0.0;
+        }
+        self.free_pages as f64 / self.total_pages as f64
+    }
+
+    /// Returns whether VACUUM would be beneficial.
+    ///
+    /// Returns true if more than 20% of pages are free.
+    pub fn needs_vacuum(&self) -> bool {
+        self.fragmentation_ratio() > 0.2
+    }
+
+    /// Returns a human-readable size string for the total database size.
+    pub fn human_total_size(&self) -> String {
+        Self::format_bytes(self.total_size_bytes as u64)
+    }
+
+    /// Returns a human-readable size string for the free space.
+    pub fn human_free_size(&self) -> String {
+        Self::format_bytes(self.free_size_bytes as u64)
+    }
+
+    fn format_bytes(bytes: u64) -> String {
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * KB;
+        const GB: u64 = 1024 * MB;
+
+        if bytes >= GB {
+            format!("{:.2} GB", bytes as f64 / GB as f64)
+        } else if bytes >= MB {
+            format!("{:.2} MB", bytes as f64 / MB as f64)
+        } else if bytes >= KB {
+            format!("{:.2} KB", bytes as f64 / KB as f64)
+        } else {
+            format!("{bytes} bytes")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,5 +712,77 @@ mod tests {
             CREATE_VAULT_ENTRIES.contains("encrypted_totp_secret"),
             "vault_entries must have encrypted_totp_secret"
         );
+    }
+
+    #[test]
+    fn page_stats_fragmentation_ratio() {
+        let stats = PageStats {
+            total_pages: 100,
+            page_size_bytes: 4096,
+            free_pages: 20,
+            used_pages: 80,
+            total_size_bytes: 409600,
+            free_size_bytes: 81920,
+        };
+        let ratio = stats.fragmentation_ratio();
+        assert!((ratio - 0.2).abs() < 0.001);
+    }
+
+    #[test]
+    fn page_stats_needs_vacuum() {
+        let stats = PageStats {
+            total_pages: 100,
+            page_size_bytes: 4096,
+            free_pages: 30,
+            used_pages: 70,
+            total_size_bytes: 409600,
+            free_size_bytes: 122880,
+        };
+        assert!(stats.needs_vacuum());
+    }
+
+    #[test]
+    fn page_stats_no_vacuum_needed() {
+        let stats = PageStats {
+            total_pages: 100,
+            page_size_bytes: 4096,
+            free_pages: 5,
+            used_pages: 95,
+            total_size_bytes: 409600,
+            free_size_bytes: 20480,
+        };
+        assert!(!stats.needs_vacuum());
+    }
+
+    #[test]
+    fn page_stats_format_bytes() {
+        assert_eq!(PageStats::format_bytes(1024), "1.00 KB");
+        assert_eq!(PageStats::format_bytes(1048576), "1.00 MB");
+    }
+
+    #[test]
+    fn page_stats_human_readable() {
+        let stats = PageStats {
+            total_pages: 1000,
+            page_size_bytes: 4096,
+            free_pages: 100,
+            used_pages: 900,
+            total_size_bytes: 4096000,
+            free_size_bytes: 409600,
+        };
+        assert_eq!(stats.human_total_size(), "3.91 MB");
+        assert_eq!(stats.human_free_size(), "400.00 KB");
+    }
+
+    #[test]
+    fn foreign_key_violation_serializes() {
+        let violation = ForeignKeyViolation {
+            table: "vault_entries".to_string(),
+            rowid: 42,
+            parent: "folders".to_string(),
+            fk_index: 0,
+        };
+        let json = serde_json::to_string(&violation).unwrap();
+        assert!(json.contains("vault_entries"));
     }
 }

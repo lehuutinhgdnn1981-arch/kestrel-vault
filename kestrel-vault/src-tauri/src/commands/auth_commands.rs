@@ -38,7 +38,7 @@ use crate::crypto::keywrap::{DataEncryptionKey, WrappedDek};
 use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
-use crate::db::DbConnection;
+use crate::db::manager::{DatabaseConfig, DatabaseManager, SharedDatabaseManager, VaultDbState};
 use crate::error::KestrelError;
 use crate::security::lockout::{FailedAttemptTracker, LockoutState};
 use crate::security::rate_limit::{Operation, RateLimiter};
@@ -73,11 +73,11 @@ pub struct AppState {
     pub rate_limiter: RwLock<RateLimiter>,
     /// Failed attempt tracker for progressive lockout.
     pub lockout_tracker: RwLock<FailedAttemptTracker>,
-    /// The encrypted database connection (SQLCipher).
-    /// Only available after vault initialization or unlock.
-    /// None when the vault is uninitialized or the database
-    /// hasn't been opened yet.
-    pub db: RwLock<Option<DbConnection>>,
+    /// The database manager for vault lifecycle operations.
+    /// Manages the encrypted SQLCipher connection pool, migrations,
+    /// integrity checks, and backup operations.
+    /// None when the vault has not been associated with a database file yet.
+    pub db_manager: RwLock<Option<SharedDatabaseManager>>,
     /// The master key (KEK), present only when vault is unlocked.
     /// When the vault is locked, this is `None` and the key
     /// memory has been zeroized via `ZeroizeOnDrop`.
@@ -113,7 +113,7 @@ impl Default for AppState {
             vault_state_machine: RwLock::new(VaultStateMachine::new()),
             rate_limiter: RwLock::new(RateLimiter::new()),
             lockout_tracker: RwLock::new(FailedAttemptTracker::new()),
-            db: RwLock::new(None),
+            db_manager: RwLock::new(None),
             master_key: RwLock::new(None),
             dek: RwLock::new(None),
             salt_hex: RwLock::new(None),
@@ -228,17 +228,46 @@ impl AppState {
         guard.clone()
     }
 
-    /// Returns a reference-counted clone of the database connection
-    /// if the database has been opened.
+    /// Returns a reference-counted clone of the database manager
+    /// if the database has been initialized.
     ///
-    /// Returns `None` if the database hasn't been initialized yet.
+    /// Returns `None` if the database manager hasn't been set up yet.
     /// This is used by vault commands that need database access.
-    pub fn get_db(&self) -> Option<DbConnection> {
-        let guard = self.db.read().unwrap_or_else(|e| {
-            tracing::error!("DB lock poisoned: {}", e);
+    pub fn get_db_manager(&self) -> Option<SharedDatabaseManager> {
+        let guard = self.db_manager.read().unwrap_or_else(|e| {
+            tracing::error!("DB manager lock poisoned: {}", e);
             std::process::exit(1);
         });
         guard.clone()
+    }
+
+    /// Returns a clone of the SqlitePool if the database is open.
+    ///
+    /// This is a convenience method for vault commands that need
+    /// direct access to the connection pool for repository operations.
+    pub fn get_db_pool(&self) -> Option<sqlx::SqlitePool> {
+        let guard = self.db_manager.read().unwrap_or_else(|e| {
+            tracing::error!("DB manager lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        match guard.as_ref() {
+            Some(manager) => manager.pool().ok(),
+            None => None,
+        }
+    }
+
+    /// Initializes the database manager with the given vault path.
+    ///
+    /// This should be called during app startup or when the vault
+    /// file location is determined. It does NOT open the database —
+    /// that happens during unlock.
+    pub fn init_db_manager(&self, vault_path: &std::path::Path) {
+        let mut guard = self.db_manager.write().unwrap_or_else(|e| {
+            tracing::error!("DB manager lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        *guard = Some(std::sync::Arc::new(DatabaseManager::new(vault_path)));
+        tracing::info!("Database manager initialized for: {}", vault_path.display());
     }
 
     /// Validates the current session and checks for auto-lock.

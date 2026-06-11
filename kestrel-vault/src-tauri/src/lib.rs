@@ -49,11 +49,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             tracing::info!("KESTREL Vault starting up");
 
-            // TODO: Initialize database connection pool
-            // TODO: Load application configuration
+            // Initialize database manager with default vault path
+            {
+                let state = app.state::<AppState>();
+                let app_data_dir = app.path().app_data_dir()
+                    .expect("Failed to resolve app data directory");
+                let vault_path = app_data_dir.join("kestrel_vault.db");
+
+                // Ensure app data directory exists
+                if !app_data_dir.exists() {
+                    std::fs::create_dir_all(&app_data_dir)?;
+                }
+
+                state.init_db_manager(&vault_path);
+                tracing::info!("Database manager initialized at: {}", vault_path.display());
+            }
+
+            // TODO: Load application configuration from disk
             // TODO: Initialize audit logger
             // TODO: Set up auto-lock timer
-            // TODO: Initialize VaultStateMachine in AppState
+            // TODO: Load vault_meta from database to restore Locked state
 
             Ok(())
         })

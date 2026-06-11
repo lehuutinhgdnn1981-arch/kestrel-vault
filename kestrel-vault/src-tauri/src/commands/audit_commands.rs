@@ -48,16 +48,15 @@ pub fn audit_query_events(
     // No state guard required — audit logs don't contain secrets
 
     // Get database pool
-    let db = state.get_db();
-    match db {
-        Some(db_conn) => {
-            let pool = db_conn.pool();
+    let pool = state.get_db_pool();
+    match pool {
+        Some(p) => {
             let rows = crate::commands::async_runtime::block_on(async {
                 match &category {
                     Some(cat) => {
-                        AuditEventRepo::query_by_category(pool, cat, limit, offset).await
+                        AuditEventRepo::query_by_category(&p, cat, limit, offset).await
                     }
-                    None => AuditEventRepo::list(pool, limit, offset).await,
+                    None => AuditEventRepo::list(&p, limit, offset).await,
                 }
             });
 
@@ -151,14 +150,12 @@ pub fn audit_export_events(
     }
 
     // Get database pool
-    let db = state.get_db();
-    match db {
-        Some(db_conn) => {
-            let pool = db_conn.pool();
-
+    let pool = state.get_db_pool();
+    match pool {
+        Some(p) => {
             // Load all audit events (with optional time filter)
             let all_events = crate::commands::async_runtime::block_on(async {
-                AuditEventRepo::list(pool, 100000, 0).await
+                AuditEventRepo::list(&p, 100000, 0).await
             });
 
             match all_events {
@@ -210,10 +207,9 @@ pub fn audit_export_events(
                     };
 
                     // Audit log the export itself
-                    if let Some(db_conn) = state.get_db() {
-                        let pool = db_conn.pool();
+                    if let Some(p) = state.get_db_pool() {
                         let _ = crate::commands::async_runtime::block_on(async {
-                            AuditEventRepo::create(pool, crate::db::audit_event_repo::CreateAuditEventRequest {
+                            AuditEventRepo::create(&p, crate::db::audit_event_repo::CreateAuditEventRequest {
                                 category: "Audit".to_string(),
                                 action: "EventsExported".to_string(),
                                 subject: "system".to_string(),

@@ -116,10 +116,9 @@ pub fn vault_create_entry(
     })?;
 
     // ── Get database pool ──
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Use VaultServiceImpl to create entry ──
     let service = VaultServiceImpl::new(&dek, pool);
@@ -197,10 +196,9 @@ pub fn vault_get_entry(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Load entry from database ──
     let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
@@ -313,10 +311,9 @@ pub fn vault_update_entry(
     })?;
 
     // ── Get database pool ──
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Use VaultServiceImpl to update entry ──
     let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
@@ -405,10 +402,9 @@ pub fn vault_delete_entry(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Delete via service ──
     let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {
@@ -473,10 +469,9 @@ pub fn vault_list_entries(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── List entries via service ──
     let service = VaultServiceImpl::new(&dek, pool);
@@ -547,10 +542,9 @@ pub fn vault_search_entries(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Search via service ──
     let service = VaultServiceImpl::new(&dek, pool);
@@ -620,10 +614,9 @@ pub fn vault_reveal_password(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // ── Reveal password via service ──
     let entry_id = uuid::Uuid::parse_str(&id).map_err(|_| {

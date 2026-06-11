@@ -158,10 +158,9 @@ pub fn scanner_run_full_scan(
     let dek = state.get_dek().ok_or_else(|| {
         CommandError::unauthorized("Vault is locked — DEK not available")
     })?;
-    let db = state.get_db().ok_or_else(|| {
+    let pool = state.get_db_pool().ok_or_else(|| {
         CommandError::unauthorized("Database not available")
     })?;
-    let pool = db.pool();
 
     // Load all vault entries
     let service = VaultServiceImpl::new(&dek, pool);
