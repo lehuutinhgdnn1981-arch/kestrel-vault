@@ -19,6 +19,7 @@
 //! - Salt values are always cryptographically random
 
 use crate::error::KestrelError;
+use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::random::random_bytes;
 use argon2::{Algorithm, Argon2, Params, Version};
 use secrecy::{ExposeSecret, Secret};
@@ -151,6 +152,53 @@ pub fn derive_key_with_new_salt(
     let salt = Salt::generate()?;
     let key = derive_key(password, &salt)?;
     Ok((key, salt))
+}
+
+/// Derives a cryptographic key using custom KDF parameters.
+///
+/// This function allows specifying custom Argon2id parameters,
+/// which is needed when loading parameters from the database
+/// that may differ from the current defaults.
+///
+/// # Arguments
+///
+/// * `password` - The user's master password (as raw bytes)
+/// * `salt` - A cryptographically random salt
+/// * `params` - The KDF parameters to use
+///
+/// # Errors
+///
+/// Returns `KestrelError::Crypto` if:
+/// - The Argon2id parameters are invalid
+/// - The key derivation computation fails
+///
+/// # Security
+///
+/// The parameters are validated before use to prevent downgrade attacks.
+pub fn derive_key_with_params(
+    password: &[u8],
+    salt: &Salt,
+    params: &KdfParams,
+) -> Result<DerivedKey, KestrelError> {
+    // Validate parameters before use
+    params.validate()?;
+
+    let argon2_params = Params::new(
+        params.memory_cost_kib,
+        params.iterations,
+        params.parallelism,
+        Some(params.key_len as usize),
+    )
+    .map_err(|e| KestrelError::Crypto(format!("Invalid Argon2 params: {e}")))?;
+
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
+
+    let mut key_bytes = [0u8; DERIVED_KEY_LEN];
+    argon2
+        .hash_password_into(password, &salt.0, &mut key_bytes)
+        .map_err(|e| KestrelError::Crypto(format!("Argon2id derivation failed: {e}")))?;
+
+    Ok(DerivedKey::new(key_bytes))
 }
 
 #[cfg(test)]

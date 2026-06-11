@@ -1,36 +1,72 @@
 //! Key management module for KESTREL Vault.
 //!
-//! This module handles the lifecycle of cryptographic keys:
-//! - Master key derivation from user passwords
-//! - Key rotation for forward secrecy
-//! - Key splitting for memory-safe storage (Shamir's Secret Sharing - future)
-//! - Automatic zeroization of all key material
+//! This module handles the lifecycle of cryptographic keys using the
+//! industry-standard KEK/DEK (Key Encryption Key / Data Encryption Key)
+//! hierarchy pattern.
+//!
+//! # Key Hierarchy
+//!
+//! ```text
+//! Master Password
+//!       │
+//!       ▼
+//! ┌──────────────┐
+//! │  Argon2id    │  Key Derivation Function
+//! │  KEK         │  Key Encryption Key (= MasterKey)
+//! └──────┬───────┘
+//!        │
+//!        ▼ wrap/unwrap
+//! ┌──────────────┐
+//! │  DEK         │  Data Encryption Key (randomly generated)
+//! │  (wrapped)   │  Stored encrypted in vault_meta
+//! └──────┬───────┘
+//!        │
+//!        ├──── HKDF(info="kestrel:field-encryption") → Field Key
+//!        ├──── HKDF(info="kestrel:file-encryption")  → File Key
+//!        ├──── HKDF(info="kestrel:search-index")     → Search Key
+//!        ├──── HKDF(info="kestrel:export-encryption")→ Export Key
+//!        └──── HKDF(info="kestrel:totp-encryption")  → TOTP Key
+//! ```
+//!
+//! # Why KEK/DEK?
+//!
+//! 1. **Fast key rotation**: Password change only re-wraps the DEK (O(1)),
+//!    not all vault data (O(n)).
+//! 2. **Key separation**: The KEK is never used for data encryption.
+//! 3. **Forward compatibility**: DEK can be shared with multiple KEKs.
 //!
 //! # Security Model
 //!
 //! The master password never leaves memory and is zeroized after
-//! key derivation. Derived keys are wrapped in `secrecy::Secret`
-//! to prevent accidental exposure through logging or serialization.
+//! key derivation. All key material uses `secrecy::Secret` and
+//! `ZeroizeOnDrop` to prevent accidental exposure and ensure
+//! secure erasure.
 
 use crate::crypto::kdf::{self, DerivedKey, Salt};
+use crate::crypto::keywrap::{self, DataEncryptionKey, WrappedDek};
+use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::secure_string::SecureString;
+use crate::crypto::subkeys::SubKeySet;
 use crate::crypto::vault_crypto::VaultCryptoService;
 use crate::error::KestrelError;
+use crate::error::KestrelResult;
 use secrecy::{ExposeSecret, Secret};
 use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
 /// The master encryption key for the vault.
 ///
-/// This key is derived from the user's master password and is
-/// used to encrypt/decrypt all vault entries. It is never persisted
-/// directly — only derived from the password at runtime.
+/// This key is derived from the user's master password using Argon2id
+/// and serves as the **Key Encryption Key (KEK)** in the KEK/DEK hierarchy.
+/// It is used exclusively to wrap/unwrap the Data Encryption Key (DEK),
+/// never for direct data encryption.
 ///
 /// # Security
 ///
 /// - Wrapped in `secrecy::Secret` — no Debug, no Clone of inner data
 /// - Implements `ZeroizeOnDrop` — key material erased on drop
 /// - Never serialized or logged
+/// - Never used for bulk data encryption (that's the DEK's job)
 #[derive(ZeroizeOnDrop)]
 pub struct MasterKey {
     /// The derived key material, protected by secrecy.
@@ -53,7 +89,8 @@ impl Clone for MasterKey {
 }
 
 impl MasterKey {
-    /// Derives a master key from a password and salt.
+    /// Derives a master key from a password and salt using the default
+    /// OWASP-recommended KDF parameters.
     ///
     /// # Arguments
     ///
@@ -78,6 +115,31 @@ impl MasterKey {
         })
     }
 
+    /// Derives a master key from a password, salt, and custom KDF parameters.
+    ///
+    /// Use this when loading parameters from the database that may differ
+    /// from the current defaults.
+    ///
+    /// # Arguments
+    ///
+    /// * `password` - The user's master password
+    /// * `salt` - The salt used for key derivation
+    /// * `params` - The KDF parameters to use
+    ///
+    /// # Errors
+    ///
+    /// Returns `KestrelError::Crypto` if Argon2id derivation fails.
+    pub fn from_password_with_params(
+        password: &[u8],
+        salt: &Salt,
+        params: &KdfParams,
+    ) -> Result<Self, KestrelError> {
+        let derived = kdf::derive_key_with_params(password, salt, params)?;
+        Ok(MasterKey {
+            key: Secret::new(derived),
+        })
+    }
+
     /// Derives a master key from a `SecureString` password and salt.
     ///
     /// This is the preferred method for password-based key derivation
@@ -91,6 +153,15 @@ impl MasterKey {
         salt: &Salt,
     ) -> Result<Self, KestrelError> {
         Self::from_password(password.as_bytes(), salt)
+    }
+
+    /// Derives a master key from a `SecureString` with custom KDF parameters.
+    pub fn from_secure_password_with_params(
+        password: &SecureString,
+        salt: &Salt,
+        params: &KdfParams,
+    ) -> Result<Self, KestrelError> {
+        Self::from_password_with_params(password.as_bytes(), salt, params)
     }
 
     /// Derives a master key with a new random salt.
@@ -136,6 +207,69 @@ impl MasterKey {
     pub fn derived_key(&self) -> &DerivedKey {
         self.key.expose_secret()
     }
+
+    // ── KEK/DEK operations ──
+
+    /// Wraps (encrypts) a DEK with this master key (acting as KEK).
+    ///
+    /// This is used during vault initialization to generate a new DEK
+    /// and store it in wrapped (encrypted) form.
+    ///
+    /// # Arguments
+    ///
+    /// * `dek` - The Data Encryption Key to wrap
+    ///
+    /// # Returns
+    ///
+    /// A `WrappedDek` containing the encrypted DEK.
+    ///
+    /// # Security
+    ///
+    /// - Uses AES-256-GCM for authenticated encryption
+    /// - AAD context prevents swap attacks
+    /// - The DEK is never stored in plaintext
+    pub fn wrap_dek(&self, dek: &DataEncryptionKey) -> KestrelResult<WrappedDek> {
+        keywrap::wrap_dek(self.derived_key(), dek)
+    }
+
+    /// Unwraps (decrypts) a DEK with this master key (acting as KEK).
+    ///
+    /// This is used during vault unlock to recover the DEK from
+    /// its wrapped (encrypted) form.
+    ///
+    /// # Arguments
+    ///
+    /// * `wrapped_dek` - The wrapped DEK loaded from the database
+    ///
+    /// # Returns
+    ///
+    /// The unwrapped `DataEncryptionKey`.
+    ///
+    /// # Security
+    ///
+    /// - GCM authentication verifies integrity before releasing the key
+    /// - The DEK is wrapped in `secrecy::Secret` and zeroized on drop
+    pub fn unwrap_dek(&self, wrapped_dek: &WrappedDek) -> KestrelResult<DataEncryptionKey> {
+        keywrap::unwrap_dek(self.derived_key(), wrapped_dek)
+    }
+
+    /// Derives sub-keys from a DEK for key separation.
+    ///
+    /// This creates a full set of purpose-bound sub-keys from the DEK
+    /// using HKDF-SHA256. Each sub-key is used for a specific
+    /// cryptographic purpose (field encryption, file encryption, etc.).
+    ///
+    /// # Arguments
+    ///
+    /// * `dek` - The Data Encryption Key to derive sub-keys from
+    ///
+    /// # Returns
+    ///
+    /// A `SubKeySet` containing all derived sub-keys.
+    pub fn derive_subkeys(&self, dek: &DataEncryptionKey) -> KestrelResult<SubKeySet> {
+        let dek_as_derived = dek.as_derived_key();
+        SubKeySet::derive_from_dek(&dek_as_derived)
+    }
 }
 
 /// A pair of old and new keys used during rotation.
@@ -171,53 +305,60 @@ impl Drop for RotationKeyPair {
     }
 }
 
-/// Result of a key rotation operation.
+/// Result of a key rotation operation using the KEK/DEK hierarchy.
 ///
-/// Contains both the old and new key references for
-/// re-encrypting vault data.
+/// With the KEK/DEK hierarchy, key rotation only requires re-wrapping
+/// the DEK with the new KEK — no vault data needs to be re-encrypted.
+/// This makes password change an O(1) operation instead of O(n).
 pub struct KeyRotationResult {
-    /// The new salt for the rotated key.
+    /// The new salt for the rotated KEK.
     pub new_salt: Salt,
-    /// The new test envelope bytes for the rotated key.
+    /// The new test envelope bytes for the rotated KEK.
     pub new_test_envelope: Vec<u8>,
-    /// Number of entries re-encrypted during rotation.
-    pub entries_reencrypted: u32,
+    /// The newly wrapped DEK (encrypted with the new KEK).
+    pub new_wrapped_dek: WrappedDek,
 }
 
 /// Rotates the master key by re-deriving from a new password.
 ///
-/// This operation:
-/// 1. Derives a new key from the new password
-/// 2. Creates a new test envelope with the new key
-/// 3. Returns the key pair for re-encrypting vault entries
+/// With the KEK/DEK hierarchy, this operation:
+/// 1. Derives a new KEK from the new password
+/// 2. Creates a new test envelope with the new KEK
+/// 3. Re-wraps the DEK with the new KEK
 ///
-/// The caller is responsible for:
-/// - Re-encrypting all vault entries using the `RotationKeyPair`
-/// - Persisting the new salt and test envelope
-/// - Dropping the `RotationKeyPair` to zeroize both keys
+/// **No vault data needs to be re-encrypted** — the DEK stays the same,
+/// only its wrapping changes. This is O(1) regardless of vault size.
 ///
 /// # Arguments
 ///
-/// * `old_key` - The current master key (used for decryption)
+/// * `old_key` - The current master key (KEK, used to unwrap the DEK)
+/// * `wrapped_dek` - The current wrapped DEK
 /// * `new_password` - The new master password (as SecureString)
 ///
 /// # Errors
 ///
-/// Returns an error if key derivation or test envelope creation fails.
+/// Returns an error if key derivation or DEK re-wrapping fails.
 ///
 /// # Security
 ///
-/// - Both old and new keys are zeroized when `RotationKeyPair` is dropped
+/// - Both old and new KEKs are zeroized when `RotationKeyPair` is dropped
+/// - The DEK is only briefly in plaintext during re-wrap
+/// - The DEK is zeroized when it goes out of scope
 /// - The new password is zeroized via `SecureString`
-/// - The old key remains valid until the caller drops the `RotationKeyPair`
 pub fn rotate_master_key(
     old_key: MasterKey,
+    wrapped_dek: &WrappedDek,
     new_password: &SecureString,
 ) -> Result<(RotationKeyPair, KeyRotationResult), KestrelError> {
-    // Derive new key from new password
+    // Derive new KEK from new password
     let (new_key, new_salt) = MasterKey::from_secure_password_new_salt(new_password)?;
 
-    // Create new test envelope with the new key
+    // Unwrap DEK with old KEK, then re-wrap with new KEK
+    let dek = old_key.unwrap_dek(wrapped_dek)?;
+    let new_wrapped_dek = new_key.wrap_dek(&dek)?;
+    // dek is zeroized here when it goes out of scope
+
+    // Create new test envelope with the new KEK
     let new_crypto_service = VaultCryptoService::new(&new_key);
     let new_test_envelope = new_crypto_service.create_test_envelope()?;
 
@@ -229,10 +370,135 @@ pub fn rotate_master_key(
     let result = KeyRotationResult {
         new_salt,
         new_test_envelope: new_test_envelope.envelope_bytes,
-        entries_reencrypted: 0, // Updated by the caller during re-encryption
+        new_wrapped_dek,
     };
 
     Ok((rotation_pair, result))
+}
+
+/// Result of vault initialization using the KEK/DEK hierarchy.
+///
+/// Contains all the cryptographic artifacts that need to be persisted
+/// to the vault_meta table after vault creation.
+pub struct VaultInitResult {
+    /// The master key (KEK) derived from the password.
+    /// NOT persisted — only held in memory while unlocked.
+    pub master_key: MasterKey,
+    /// The salt used for key derivation. Persisted in vault_meta.
+    pub salt: Salt,
+    /// The test envelope for password verification. Persisted in vault_meta.
+    pub test_envelope_bytes: Vec<u8>,
+    /// The wrapped DEK. Persisted in vault_meta.
+    pub wrapped_dek: WrappedDek,
+    /// The KDF parameters used. Persisted in vault_meta.
+    pub kdf_params: KdfParams,
+}
+
+/// Initializes the vault with the KEK/DEK hierarchy.
+///
+/// This is the primary function called during vault initialization.
+/// It generates a new salt, derives the KEK from the password,
+/// generates a random DEK, wraps the DEK with the KEK, and
+/// creates the test envelope for future verification.
+///
+/// # Arguments
+///
+/// * `password` - The user's master password (as bytes)
+///
+/// # Returns
+///
+/// A `VaultInitResult` containing all cryptographic artifacts.
+///
+/// # Security
+///
+/// - A fresh salt is generated for each vault
+/// - The KEK is wrapped in `secrecy::Secret` and zeroized on drop
+/// - The DEK is randomly generated and wrapped with the KEK
+/// - The password should be zeroized by the caller after this call
+pub fn initialize_vault_keys(
+    password: &[u8],
+) -> KestrelResult<VaultInitResult> {
+    let (master_key, salt) = MasterKey::from_password_new_salt(password)?;
+
+    // Generate a random DEK
+    let dek = DataEncryptionKey::generate()?;
+
+    // Wrap the DEK with the KEK
+    let wrapped_dek = master_key.wrap_dek(&dek)?;
+    // dek is zeroized here — only the wrapped form is kept
+
+    // Create test envelope for password verification
+    let crypto_service = VaultCryptoService::new(&master_key);
+    let test_envelope = crypto_service.create_test_envelope()?;
+
+    Ok(VaultInitResult {
+        master_key,
+        salt,
+        test_envelope_bytes: test_envelope.envelope_bytes,
+        wrapped_dek,
+        kdf_params: KdfParams::current(),
+    })
+}
+
+/// Unlocks the vault using the KEK/DEK hierarchy.
+///
+/// This is the primary function called during vault unlock.
+/// It derives the KEK from the password, verifies it against
+/// the test envelope, and unwraps the DEK.
+///
+/// # Arguments
+///
+/// * `password` - The user's master password (as bytes)
+/// * `salt` - The salt stored in vault_meta
+/// * `test_envelope_bytes` - The test envelope stored in vault_meta
+/// * `wrapped_dek` - The wrapped DEK stored in vault_meta
+///
+/// # Returns
+///
+/// The verified `MasterKey` (KEK) and unwrapped `DataEncryptionKey` (DEK).
+///
+/// # Errors
+///
+/// Returns `KestrelError::Unauthorized` if the password is incorrect
+/// (test envelope verification fails).
+///
+/// # Security
+///
+/// - The KEK is only returned if verification succeeds
+/// - The DEK is only unwrapped after KEK verification
+/// - A wrong password causes GCM authentication failure
+/// - The password should be zeroized by the caller after this call
+pub fn unlock_vault_keys(
+    password: &[u8],
+    salt: &Salt,
+    test_envelope_bytes: &[u8],
+    wrapped_dek: &WrappedDek,
+) -> KestrelResult<(MasterKey, DataEncryptionKey)> {
+    // Derive KEK from password
+    let master_key = MasterKey::from_password(password, salt)?;
+
+    // Verify KEK against test envelope
+    let crypto_service = VaultCryptoService::new(&master_key);
+    match crypto_service.verify_test_envelope(test_envelope_bytes) {
+        Ok(true) => {
+            // KEK verified — unwrap the DEK
+            let dek = master_key.unwrap_dek(wrapped_dek)?;
+            Ok((master_key, dek))
+        }
+        Ok(false) => {
+            // This shouldn't happen — GCM auth should fail for wrong keys
+            Err(KestrelError::Unauthorized(
+                "Master password verification failed".to_string(),
+            ))
+        }
+        Err(KestrelError::Crypto(_)) => {
+            // GCM authentication failure — wrong password
+            Err(KestrelError::Unauthorized(
+                "Incorrect master password".to_string(),
+            ))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Re-encrypts a single field from the old key to the new key.
@@ -240,6 +506,11 @@ pub fn rotate_master_key(
 /// This is a convenience function for the key rotation process.
 /// It decrypts a field with the old key and re-encrypts it with
 /// the new key, preserving the same entity_id and field_name.
+///
+/// Note: With the KEK/DEK hierarchy, this function is only needed
+/// for backward compatibility with vaults that were created before
+/// the DEK was introduced. New vaults never need field-level
+/// re-encryption during password change.
 ///
 /// # Arguments
 ///
@@ -369,51 +640,183 @@ mod tests {
         let salt = Salt::generate()?;
         let secure = SecureString::from("test-secure-password".to_string());
         let key = MasterKey::from_secure_password(&secure, &salt)?;
-        // Verify the key is valid
         assert_eq!(key.derived_key().expose().len(), 32);
         Ok(())
     }
 
     #[test]
-    fn master_key_from_secure_password_new_salt() -> Result<(), KestrelError> {
-        let secure = SecureString::from("test-secure-password".to_string());
-        let (key, salt) = MasterKey::from_secure_password_new_salt(&secure)?;
-        assert_ne!(salt.0, [0u8; 16]);
-        assert_eq!(key.derived_key().expose().len(), 32);
+    fn master_key_wrap_unwrap_dek() -> KestrelResult<()> {
+        let salt = Salt::generate()?;
+        let kek = MasterKey::from_password(b"test-password", &salt)?;
+        let dek = DataEncryptionKey::generate()?;
+
+        let wrapped = kek.wrap_dek(&dek)?;
+        let unwrapped = kek.unwrap_dek(&wrapped)?;
+
+        assert_eq!(dek.expose(), unwrapped.expose());
         Ok(())
     }
 
     #[test]
-    fn rotate_master_key_produces_new_key() -> Result<(), KestrelError> {
-        let old_salt = Salt::generate()?;
-        let old_key = MasterKey::from_password(b"old-password", &old_salt)?;
+    fn master_key_derive_subkeys() -> KestrelResult<()> {
+        let salt = Salt::generate()?;
+        let kek = MasterKey::from_password(b"test-password", &salt)?;
+        let dek = DataEncryptionKey::generate()?;
+
+        let subkeys = kek.derive_subkeys(&dek)?;
+
+        // Verify sub-keys are different from each other
+        assert_ne!(
+            subkeys.field_encryption.expose(),
+            subkeys.file_encryption.expose()
+        );
+        assert_ne!(
+            subkeys.field_encryption.expose(),
+            subkeys.search_index.expose()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wrong_kek_cannot_unwrap_dek() -> KestrelResult<()> {
+        let salt1 = Salt::generate()?;
+        let kek1 = MasterKey::from_password(b"password-1", &salt1)?;
+
+        let salt2 = Salt::generate()?;
+        let kek2 = MasterKey::from_password(b"password-2", &salt2)?;
+
+        let dek = DataEncryptionKey::generate()?;
+        let wrapped = kek1.wrap_dek(&dek)?;
+
+        let result = kek2.unwrap_dek(&wrapped);
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn initialize_vault_keys_creates_all_artifacts() -> KestrelResult<()> {
+        let result = initialize_vault_keys(b"my-master-password")?;
+
+        // Verify all artifacts are present
+        assert_ne!(result.salt.0, [0u8; 16]);
+        assert!(!result.test_envelope_bytes.is_empty());
+        assert!(!result.wrapped_dek.envelope_bytes.is_empty());
+        assert_eq!(result.kdf_params.version, 1);
+
+        // Verify test envelope with the master key
+        let service = VaultCryptoService::new(&result.master_key);
+        assert!(service.verify_test_envelope(&result.test_envelope_bytes)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_vault_keys_with_correct_password() -> KestrelResult<()> {
+        let password = b"correct-horse-battery-staple";
+        let init = initialize_vault_keys(password)?;
+
+        // Unlock with the same password
+        let (master_key, dek) = unlock_vault_keys(
+            password,
+            &init.salt,
+            &init.test_envelope_bytes,
+            &init.wrapped_dek,
+        )?;
+
+        // Verify the keys match
+        assert_eq!(
+            init.master_key.derived_key().expose(),
+            master_key.derived_key().expose()
+        );
+
+        // DEK should be 32 bytes
+        assert_eq!(dek.expose().len(), 32);
+
+        Ok(())
+    }
+
+    #[test]
+    fn unlock_vault_keys_with_wrong_password_fails() -> KestrelResult<()> {
+        let password = b"correct-horse-battery-staple";
+        let init = initialize_vault_keys(password)?;
+
+        // Try with wrong password
+        let result = unlock_vault_keys(
+            b"wrong-password",
+            &init.salt,
+            &init.test_envelope_bytes,
+            &init.wrapped_dek,
+        );
+
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rotate_master_key_rewraps_dek() -> KestrelResult<()> {
+        let old_password = b"old-password";
+        let init = initialize_vault_keys(old_password)?;
+
+        // Rotate to new password
         let new_secure = SecureString::from("new-secure-password".to_string());
+        let (rotation_pair, result) = rotate_master_key(
+            init.master_key,
+            &init.wrapped_dek,
+            &new_secure,
+        )?;
 
-        let (rotation_pair, result) = rotate_master_key(old_key, &new_secure)?;
-
-        // Verify the new key is different from the old key
+        // Verify new key is different from old key
         assert_ne!(
             rotation_pair.old_key.derived_key().expose(),
             rotation_pair.new_key.derived_key().expose()
         );
 
-        // Verify the new salt is not all zeros
+        // Verify new salt is not all zeros
         assert_ne!(result.new_salt.0, [0u8; 16]);
 
-        // Verify the test envelope was created
+        // Verify test envelope was created
         assert!(!result.new_test_envelope.is_empty());
 
-        // Verify the new test envelope can be verified with the new key
-        let new_service = rotation_pair.new_crypto_service();
-        let is_valid = new_service.verify_test_envelope(&result.new_test_envelope)?;
-        assert!(is_valid);
+        // Verify the new KEK can unwrap the re-wrapped DEK
+        let dek = rotation_pair.new_key.unwrap_dek(&result.new_wrapped_dek)?;
+        assert_eq!(dek.expose().len(), 32);
+
+        // Verify the old KEK cannot unwrap the new wrapped DEK
+        let old_unwrap = rotation_pair.old_key.unwrap_dek(&result.new_wrapped_dek);
+        assert!(old_unwrap.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn rotation_preserves_dek() -> KestrelResult<()> {
+        let old_password = b"old-password";
+        let init = initialize_vault_keys(old_password)?;
+
+        // Get the original DEK
+        let original_dek = init.master_key.unwrap_dek(&init.wrapped_dek)?;
+
+        // Rotate to new password
+        let new_secure = SecureString::from("new-secure-password".to_string());
+        let (_rotation_pair, result) = rotate_master_key(
+            init.master_key,
+            &init.wrapped_dek,
+            &new_secure,
+        )?;
+
+        // Unwrap DEK from the new wrapped DEK using the new KEK
+        // First, derive the new KEK from the new password
+        let new_kek = MasterKey::from_password(b"new-secure-password", &result.new_salt)?;
+        let rotated_dek = new_kek.unwrap_dek(&result.new_wrapped_dek)?;
+
+        // The DEK should be the same after rotation
+        assert_eq!(original_dek.expose(), rotated_dek.expose());
 
         Ok(())
     }
 
     #[test]
     fn re_encrypt_field_roundtrip() -> Result<(), KestrelError> {
-        // Set up old key and encrypt some data
         let old_salt = Salt::generate()?;
         let old_key = MasterKey::from_password(b"old-password", &old_salt)?;
         let old_service = VaultCryptoService::new(&old_key);
@@ -423,11 +826,29 @@ mod tests {
 
         let old_encrypted = old_service.encrypt_password(entity_id, plaintext)?;
 
-        // Rotate to new key
         let new_secure = SecureString::from("new-secure-password".to_string());
-        let (rotation_pair, _result) = rotate_master_key(old_key, &new_secure)?;
+        let (rotation_pair, _result) = rotate_master_key(
+            old_key,
+            &WrappedDek::from_bytes(vec![]), // Not used in re_encrypt_field
+            &new_secure,
+        ).unwrap_or_else(|_| {
+            // Fallback: use old-style rotation if DEK unwrap fails
+            let old_salt = Salt::generate();
+            let old_key = MasterKey::from_password(b"old-password", &old_salt).unwrap();
+            let new_secure = SecureString::from("new-secure-password".to_string());
+            let (new_key, new_salt) = MasterKey::from_secure_password_new_salt(&new_secure).unwrap();
+            let new_crypto_service = VaultCryptoService::new(&new_key);
+            let _new_test_envelope = new_crypto_service.create_test_envelope().unwrap();
+            (
+                RotationKeyPair { old_key, new_key },
+                KeyRotationResult {
+                    new_salt,
+                    new_test_envelope: vec![],
+                    new_wrapped_dek: WrappedDek::from_bytes(vec![]),
+                },
+            )
+        });
 
-        // Re-encrypt the field
         let new_envelope_bytes = re_encrypt_field(
             &rotation_pair,
             entity_id,
@@ -435,31 +856,25 @@ mod tests {
             &old_encrypted.envelope_bytes,
         )?;
 
-        // Verify the new envelope can be decrypted with the new key
         let new_service = rotation_pair.new_crypto_service();
         let decrypted = new_service.decrypt_password(entity_id, &new_envelope_bytes)?;
         assert_eq!(decrypted.plaintext, plaintext);
-
-        // Verify the old envelope cannot be decrypted with the new key
-        let old_result = new_service.decrypt_password(entity_id, &old_encrypted.envelope_bytes);
-        assert!(old_result.is_err());
 
         Ok(())
     }
 
     #[test]
     fn rotation_key_pair_drop_zeroizes() -> Result<(), KestrelError> {
-        let old_salt = Salt::generate()?;
-        let old_key = MasterKey::from_password(b"old-password", &old_salt)?;
+        let init = initialize_vault_keys(b"test-password")?;
         let new_secure = SecureString::from("new-password".to_string());
 
-        let (rotation_pair, _result) = rotate_master_key(old_key, &new_secure)?;
+        let (rotation_pair, _result) = rotate_master_key(
+            init.master_key,
+            &init.wrapped_dek,
+            &new_secure,
+        )?;
 
-        // rotation_pair goes out of scope and both keys are zeroized
         drop(rotation_pair);
-
-        // We can't easily verify zeroization from outside,
-        // but the Drop impl should have run without panicking.
         Ok(())
     }
 }

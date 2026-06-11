@@ -33,7 +33,9 @@ use crate::commands::types::{
 };
 use crate::config::AppConfig;
 use crate::crypto::kdf::{MEMORY_COST, ITERATIONS, PARALLELISM};
-use crate::crypto::key_management::MasterKey;
+use crate::crypto::key_management::{MasterKey, initialize_vault_keys, unlock_vault_keys, rotate_master_key};
+use crate::crypto::keywrap::{DataEncryptionKey, WrappedDek};
+use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::secure_string::SecureString;
 use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
 use crate::error::KestrelError;
@@ -70,16 +72,28 @@ pub struct AppState {
     pub rate_limiter: RwLock<RateLimiter>,
     /// Failed attempt tracker for progressive lockout.
     pub lockout_tracker: RwLock<FailedAttemptTracker>,
-    /// The master key, present only when vault is unlocked.
+    /// The master key (KEK), present only when vault is unlocked.
     /// When the vault is locked, this is `None` and the key
     /// memory has been zeroized via `ZeroizeOnDrop`.
+    /// In the KEK/DEK hierarchy, this key wraps/unwraps the DEK.
     pub master_key: RwLock<Option<MasterKey>>,
+    /// The data encryption key (DEK), present only when vault is unlocked.
+    /// The DEK is used for all field-level encryption/decryption.
+    /// It is wrapped (encrypted) by the KEK and stored in vault_meta.
+    /// When the vault is locked, this is `None` and the key is zeroized.
+    pub dek: RwLock<Option<DataEncryptionKey>>,
     /// Hex-encoded salt for key derivation (persisted in vault_meta).
     /// Available after vault initialization.
     pub salt_hex: RwLock<Option<String>>,
     /// Test envelope bytes for password verification.
     /// Available after vault initialization.
     pub test_envelope: RwLock<Option<Vec<u8>>>,
+    /// The wrapped DEK bytes (persisted in vault_meta).
+    /// Available after vault initialization.
+    pub wrapped_dek: RwLock<Option<WrappedDek>>,
+    /// KDF parameters (persisted in vault_meta).
+    /// Available after vault initialization.
+    pub kdf_params: RwLock<Option<KdfParams>>,
     /// The current session, present only when vault is unlocked.
     /// Contains no secrets — only session metadata (ID, timestamps, state).
     pub session: RwLock<Option<Session>>,
@@ -94,8 +108,11 @@ impl Default for AppState {
             rate_limiter: RwLock::new(RateLimiter::new()),
             lockout_tracker: RwLock::new(FailedAttemptTracker::new()),
             master_key: RwLock::new(None),
+            dek: RwLock::new(None),
             salt_hex: RwLock::new(None),
             test_envelope: RwLock::new(None),
+            wrapped_dek: RwLock::new(None),
+            kdf_params: RwLock::new(None),
             session: RwLock::new(None),
             config: RwLock::new(AppConfig::default()),
         }
@@ -187,6 +204,18 @@ impl AppState {
     pub fn get_master_key(&self) -> Option<MasterKey> {
         let guard = self.master_key.read().unwrap_or_else(|e| {
             tracing::error!("Master key lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone()
+    }
+
+    /// Returns a clone of the DEK if the vault is unlocked.
+    ///
+    /// Returns `None` if the vault is locked or uninitialized.
+    /// This is used by vault commands that need field-level encryption.
+    pub fn get_dek(&self) -> Option<DataEncryptionKey> {
+        let guard = self.dek.read().unwrap_or_else(|e| {
+            tracing::error!("DEK lock poisoned: {}", e);
             std::process::exit(1);
         });
         guard.clone()
@@ -284,13 +313,22 @@ impl AppState {
             }
         }
 
-        // Zeroize the master key
+        // Zeroize the master key (KEK)
         {
             let mut key_guard = self.master_key.write().unwrap_or_else(|e| {
                 tracing::error!("Master key lock poisoned: {}", e);
                 std::process::exit(1);
             });
             *key_guard = None;
+        }
+
+        // Zeroize the DEK
+        {
+            let mut dek_guard = self.dek.write().unwrap_or_else(|e| {
+                tracing::error!("DEK lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *dek_guard = None;
         }
 
         // Destroy the session
@@ -333,9 +371,15 @@ impl AppState {
 
     /// Stores vault metadata in memory after initialization.
     ///
-    /// This updates the in-memory salt and test envelope so that
-    /// unlock can work without querying the database.
-    fn store_vault_meta_in_memory(&self, salt_hex: String, test_envelope: Vec<u8>) {
+    /// This updates the in-memory salt, test envelope, wrapped DEK,
+    /// and KDF params so that unlock can work without querying the database.
+    fn store_vault_meta_in_memory(
+        &self,
+        salt_hex: String,
+        test_envelope: Vec<u8>,
+        wrapped_dek: WrappedDek,
+        kdf_params: KdfParams,
+    ) {
         {
             let mut salt = self.salt_hex.write().unwrap_or_else(|e| {
                 tracing::error!("Salt lock poisoned: {}", e);
@@ -349,6 +393,20 @@ impl AppState {
                 std::process::exit(1);
             });
             *envelope = Some(test_envelope);
+        }
+        {
+            let mut wdek = self.wrapped_dek.write().unwrap_or_else(|e| {
+                tracing::error!("Wrapped DEK lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *wdek = Some(wrapped_dek);
+        }
+        {
+            let mut params = self.kdf_params.write().unwrap_or_else(|e| {
+                tracing::error!("KDF params lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *params = Some(kdf_params);
         }
     }
 
@@ -412,11 +470,11 @@ pub fn auth_initialize_vault(
     // Guard: vault must be in Uninitialized state
     state.require_state(VaultState::Uninitialized)?;
 
-    // ── Crypto: Derive master key + create test envelope ──
+    // ── Crypto: KEK/DEK hierarchy initialization ──
     // Convert password to SecureString immediately for zeroization
-    let (master_key, salt, test_envelope_bytes) = {
+    let init_result = {
         let secure_password = SecureString::from(master_password);
-        let result = initialize_vault_crypto(secure_password.as_bytes());
+        let result = initialize_vault_keys(secure_password.as_bytes());
         // secure_password is zeroized when it goes out of scope
         match result {
             Ok(r) => r,
@@ -425,7 +483,7 @@ pub fn auth_initialize_vault(
     };
 
     // Encode salt as hex for storage
-    let salt_hex: String = salt.0.iter().map(|b| format!("{b:02x}")).collect();
+    let salt_hex: String = init_result.salt.0.iter().map(|b| format!("{b:02x}")).collect();
 
     // ── Transition: Uninitialized → Locked ──
     {
@@ -455,13 +513,19 @@ pub fn auth_initialize_vault(
     // ── Store vault metadata in memory ──
     // In production, this would be persisted to the database via VaultMetaRepo.
     // For now, we store it in AppState for the current session.
-    state.store_vault_meta_in_memory(salt_hex.clone(), test_envelope_bytes.clone());
+    state.store_vault_meta_in_memory(
+        salt_hex.clone(),
+        init_result.test_envelope_bytes.clone(),
+        init_result.wrapped_dek.clone(),
+        init_result.kdf_params.clone(),
+    );
 
     // ── Store master key in AppState (vault is now Locked, NOT Unlocked) ──
     // After initialization, the vault goes to Locked state.
     // The master key is NOT stored — the user must explicitly unlock.
     // We zeroize the master key immediately since we're going to Locked state.
-    drop(master_key);
+    // The DEK is also NOT stored — it's only in wrapped (encrypted) form.
+    drop(init_result.master_key);
 
     // TODO: Persist vault_meta to database via VaultMetaRepo
     // vault_meta: {
@@ -540,9 +604,9 @@ pub fn auth_unlock(
     // Guard: check lockout state
     state.check_lockout()?;
 
-    // ── Crypto: Derive key + verify test envelope ──
+    // ── Crypto: KEK/DEK unlock ──
     let unlock_result = {
-        // Get the stored salt and test envelope
+        // Get the stored salt, test envelope, and wrapped DEK
         let salt_hex = {
             let guard = state.salt_hex.read().unwrap_or_else(|e| {
                 tracing::error!("Salt lock poisoned: {}", e);
@@ -557,9 +621,16 @@ pub fn auth_unlock(
             });
             guard.clone()
         };
+        let wrapped_dek = {
+            let guard = state.wrapped_dek.read().unwrap_or_else(|e| {
+                tracing::error!("Wrapped DEK lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            guard.clone()
+        };
 
-        match (salt_hex, test_envelope_bytes) {
-            (Some(sh), Some(te)) => {
+        match (salt_hex, test_envelope_bytes, wrapped_dek) {
+            (Some(sh), Some(te), Some(wdek)) => {
                 // Parse salt from hex
                 let salt = match AppState::parse_salt_from_hex(&sh) {
                     Ok(s) => s,
@@ -568,21 +639,31 @@ pub fn auth_unlock(
 
                 // Convert password to SecureString for zeroization
                 let secure_password = SecureString::from(master_password);
-                let result = unlock_vault_crypto(secure_password.as_bytes(), &salt, &te);
+
+                // Use KEK/DEK hierarchy: derive KEK, verify test envelope, unwrap DEK
+                let result = unlock_vault_keys(
+                    secure_password.as_bytes(),
+                    &salt,
+                    &te,
+                    &wdek,
+                );
                 // secure_password is zeroized when it goes out of scope
                 result
             }
-            (None, _) => Err(KestrelError::Config(
+            (None, _, _) => Err(KestrelError::Config(
                 "Vault salt not found. Vault may not be initialized.".to_string(),
             )),
-            (_, None) => Err(KestrelError::Config(
+            (_, None, _) => Err(KestrelError::Config(
                 "Test envelope not found. Vault may not be initialized.".to_string(),
+            )),
+            (_, _, None) => Err(KestrelError::Config(
+                "Wrapped DEK not found. Vault may not be initialized.".to_string(),
             )),
         }
     };
 
     match unlock_result {
-        Ok(master_key) => {
+        Ok((master_key, dek)) => {
             // ── Successful unlock ──
 
             // Reset lockout tracker
@@ -646,13 +727,22 @@ pub fn auth_unlock(
                 *session_guard = Some(new_session);
             }
 
-            // Store master key in AppState
+            // Store master key (KEK) in AppState
             {
                 let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
                     tracing::error!("Master key lock poisoned: {}", e);
                     std::process::exit(1);
                 });
                 *key_guard = Some(master_key);
+            }
+
+            // Store DEK in AppState
+            {
+                let mut dek_guard = state.dek.write().unwrap_or_else(|e| {
+                    tracing::error!("DEK lock poisoned: {}", e);
+                    std::process::exit(1);
+                });
+                *dek_guard = Some(dek);
             }
 
             // TODO: Audit log: UnlockSucceeded
@@ -744,7 +834,7 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         }
     }
 
-    // ── Zeroize master key ──
+    // ── Zeroize master key (KEK) ──
     {
         let mut key_guard = state.master_key.write().unwrap_or_else(|e| {
             tracing::error!("Master key lock poisoned: {}", e);
@@ -753,6 +843,16 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         // Dropping the MasterKey triggers ZeroizeOnDrop, which
         // securely erases the key material from memory.
         *key_guard = None;
+    }
+
+    // ── Zeroize DEK ──
+    {
+        let mut dek_guard = state.dek.write().unwrap_or_else(|e| {
+            tracing::error!("DEK lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        // Dropping the DataEncryptionKey triggers ZeroizeOnDrop.
+        *dek_guard = None;
     }
 
     // ── Destroy session ──
@@ -775,7 +875,7 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
 
     // TODO: Audit log: VaultLocked
 
-    tracing::info!("Vault locked — master key zeroized, session destroyed");
+    tracing::info!("Vault locked — KEK and DEK zeroized, session destroyed");
 
     CommandResult::ok(VaultLockResponse {
         state: VaultState::Locked.to_string(),

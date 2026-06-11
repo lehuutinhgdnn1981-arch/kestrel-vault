@@ -5,25 +5,44 @@
 //! primitives (envelope encryption, AAD context) with the domain types
 //! (VaultEntry, encrypted fields).
 //!
-//! # Architecture
+//! # Architecture (KEK/DEK Hierarchy)
 //!
 //! ```text
 //! ┌──────────────┐     ┌─────────────────────┐     ┌──────────────────┐
 //! │ Command Layer │────▶│ VaultCryptoService  │────▶│ Envelope / Cipher │
 //! │ (auth/vault)  │     │ (field-level ops)   │     │ (AES-256-GCM)    │
 //! └──────────────┘     └─────────────────────┘     └──────────────────┘
+//!                              │
+//!                     ┌────────┴────────┐
+//!                     │                 │
+//!                KEK (MasterKey)    DEK (DataEncryptionKey)
+//!                test envelope      field encryption
+//!                key wrapping       sub-key derivation
 //! ```
+//!
+//! # Two Service Modes
+//!
+//! 1. **KEK mode** (`VaultCryptoService::new_kek`): Uses the master key (KEK)
+//!    for test envelope creation/verification and DEK wrap/unwrap.
+//!    Never used for bulk data encryption.
+//!
+//! 2. **DEK mode** (`VaultCryptoService::new_dek`): Uses the data encryption
+//!    key (DEK) or a sub-key for field-level encryption/decryption.
+//!    This is the primary mode for vault operations.
 //!
 //! # Security
 //!
 //! - Every encrypted field is bound to its entity via AAD context
-//! - The master key is never exposed outside this service
+//! - The KEK is never used for data encryption (key separation)
+//! - The DEK is never exposed outside this service
 //! - All plaintext is zeroized after use
 //! - Fresh nonces are generated for every encryption
 
 use crate::crypto::envelope::{self, AadContext, EncryptedEnvelope};
 use crate::crypto::key_management::MasterKey;
-use crate::crypto::kdf::Salt;
+use crate::crypto::keywrap::DataEncryptionKey;
+use crate::crypto::kdf::{DerivedKey, Salt};
+use crate::crypto::subkeys::SubKey;
 use crate::error::{KestrelError, KestrelResult};
 use zeroize::Zeroize;
 
@@ -88,38 +107,77 @@ impl Drop for DecryptedField {
 /// The vault crypto service.
 ///
 /// This service provides field-level encryption and decryption operations
-/// for vault data. It requires a valid `MasterKey` to operate, which
-/// is only available when the vault is in the `Unlocked` state.
+/// for vault data. It supports two modes:
+///
+/// 1. **KEK mode**: Uses the master key for test envelope operations
+///    and DEK wrap/unwrap. Created with `VaultCryptoService::new()`.
+///
+/// 2. **DEK mode**: Uses the data encryption key for field-level
+///    encryption/decryption. Created with `VaultCryptoService::new_dek()`.
 ///
 /// # Thread Safety
 ///
-/// This struct holds a reference to the master key and is NOT thread-safe
+/// This struct holds references to keys and is NOT thread-safe
 /// by itself. The caller must wrap it in appropriate synchronization
-/// primitives (e.g., `Arc<RwLock<MasterKey>>`).
+/// primitives.
 ///
 /// # Usage
 ///
 /// ```ignore
-/// let service = VaultCryptoService::new(&master_key);
+/// // KEK mode (for test envelope and DEK wrapping)
+/// let kek_service = VaultCryptoService::new(&master_key);
+/// let test_envelope = kek_service.create_test_envelope()?;
 ///
-/// // Encrypt a password field
-/// let encrypted = service.encrypt_field("entry-uuid-123", "password", b"my-secret")?;
-///
-/// // Decrypt it back
-/// let decrypted = service.decrypt_field("entry-uuid-123", "password", &encrypted.envelope_bytes)?;
-/// assert_eq!(decrypted.plaintext, b"my-secret");
+/// // DEK mode (for field-level encryption)
+/// let dek_service = VaultCryptoService::new_dek(&dek);
+/// let encrypted = dek_service.encrypt_field("entry-uuid-123", "password", b"my-secret")?;
+/// let decrypted = dek_service.decrypt_field("entry-uuid-123", "password", &encrypted.envelope_bytes)?;
 /// ```
-pub struct VaultCryptoService<'a> {
-    /// Reference to the master key. Only available when vault is unlocked.
-    key: &'a MasterKey,
+pub enum VaultCryptoService<'a> {
+    /// KEK mode: Uses the master key for test envelope and DEK wrap/unwrap.
+    Kek(&'a MasterKey),
+    /// DEK mode: Uses the data encryption key for field-level encryption.
+    Dek(&'a DataEncryptionKey),
+    /// SubKey mode: Uses a specific sub-key for purpose-bound encryption.
+    SubKey(&'a SubKey),
 }
 
 impl<'a> VaultCryptoService<'a> {
-    /// Creates a new vault crypto service with the given master key.
+    /// Creates a new vault crypto service in KEK mode.
     ///
     /// The master key must be valid and correspond to the current vault.
+    /// KEK mode is used for test envelope creation/verification.
     pub fn new(key: &'a MasterKey) -> Self {
-        VaultCryptoService { key }
+        VaultCryptoService::Kek(key)
+    }
+
+    /// Creates a new vault crypto service in DEK mode.
+    ///
+    /// DEK mode is used for field-level encryption/decryption
+    /// of vault data. This is the primary mode for vault operations.
+    pub fn new_dek(dek: &'a DataEncryptionKey) -> Self {
+        VaultCryptoService::Dek(dek)
+    }
+
+    /// Creates a vault crypto service from a sub-key.
+    ///
+    /// SubKey mode is used for purpose-bound encryption
+    /// (e.g., field encryption, file encryption).
+    pub fn from_subkey(subkey: &'a SubKey) -> Self {
+        VaultCryptoService::SubKey(subkey)
+    }
+
+    /// Returns the derived key for encryption/decryption operations.
+    ///
+    /// In KEK mode, returns the master key's derived key.
+    /// In DEK mode, returns the DEK as a DerivedKey.
+    /// In SubKey mode, returns the sub-key as a DerivedKey.
+    fn encryption_key(&self) -> DerivedKey {
+        match self {
+            VaultCryptoService::Kek(key) => key.derived_key().clone(),
+            VaultCryptoService::Dek(dek) => dek.as_derived_key(),
+            VaultCryptoService::SubKey(sk) => sk.as_derived_key(),
+        }
     }
 
     /// Encrypts a single vault field.
@@ -148,8 +206,9 @@ impl<'a> VaultCryptoService<'a> {
         field_name: &str,
         plaintext: &[u8],
     ) -> KestrelResult<EncryptedField> {
+        let key = self.encryption_key();
         let envelope = envelope::seal_envelope(
-            self.key.derived_key(),
+            &key,
             plaintext,
             entity_id,
             field_name,
@@ -190,10 +249,11 @@ impl<'a> VaultCryptoService<'a> {
         field_name: &str,
         envelope_bytes: &[u8],
     ) -> KestrelResult<DecryptedField> {
+        let key = self.encryption_key();
         let aad_context = AadContext::new(entity_id, field_name);
         let envelope = EncryptedEnvelope::from_bytes(envelope_bytes, aad_context)?;
 
-        let plaintext = envelope::open_envelope(self.key.derived_key(), &envelope)?;
+        let plaintext = envelope::open_envelope(&key, &envelope)?;
 
         Ok(DecryptedField { plaintext })
     }
