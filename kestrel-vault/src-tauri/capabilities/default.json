@@ -13,21 +13,19 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-resizable",
     "shell:allow-open",
+    "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
+    "fs:default",
     "fs:allow-read",
     "fs:allow-write",
     "fs:allow-exists",
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
-    "fs:allow-copy-file",
-    "notification:allow",
-    "notification:allow-request-permission",
-    "notification:allow-notify",
-    "notification:allow-is-permission-granted"
+    "fs:allow-copy-file"
   ]
 }

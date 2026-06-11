@@ -37,6 +37,8 @@ use tauri::Manager;
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(AppState::default())
         .setup(|app| {
             // Initialize tracing subscriber for structured logging
