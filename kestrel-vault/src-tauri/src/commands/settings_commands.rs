@@ -33,7 +33,7 @@ pub fn settings_get(
         std::process::exit(1);
     });
 
-    CommandResult::ok(AppSettingsResponse {
+    Ok(AppSettingsResponse {
         auto_lock_minutes: config.auto_lock_minutes,
         theme: config.theme.clone(),
         language: config.language.clone(),
@@ -68,11 +68,11 @@ pub fn settings_update(
     // Validate theme if provided
     if let Some(ref t) = theme {
         if let Err(e) = validate_field(t, 20, "theme") {
-            return CommandResult::Err(e);
+            return Err(e);
         }
         let valid = ["dark", "light", "system"];
         if !valid.contains(&t.as_str()) {
-            return CommandResult::Err(CommandError::validation(
+            return Err(CommandError::validation(
                 "Theme must be one of: dark, light, system",
             ));
         }
@@ -81,21 +81,21 @@ pub fn settings_update(
     // Validate language if provided
     if let Some(ref l) = language {
         if let Err(e) = validate_field(l, 10, "language") {
-            return CommandResult::Err(e);
+            return Err(e);
         }
     }
 
     // Validate numeric ranges (using AppConfig clamping rules)
     if let Some(mins) = auto_lock_minutes {
         if mins < 1 || mins > 480 {
-            return CommandResult::Err(CommandError::validation(
+            return Err(CommandError::validation(
                 "Auto-lock must be between 1 and 480 minutes",
             ));
         }
     }
     if let Some(secs) = clear_clipboard_seconds {
         if secs < 5 || secs > 300 {
-            return CommandResult::Err(CommandError::validation(
+            return Err(CommandError::validation(
                 "Clear clipboard must be between 5 and 300 seconds",
             ));
         }
@@ -141,7 +141,7 @@ pub fn settings_update(
 
     tracing::info!("Settings updated");
 
-    CommandResult::ok(updated_response)
+    Ok(updated_response)
 }
 
 #[cfg(test)]

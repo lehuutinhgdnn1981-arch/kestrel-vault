@@ -8,7 +8,7 @@
 //! - Passwords are NEVER included in response types
 //! - All input is validated before processing
 //! - Errors are sanitized before sending to frontend
-//! - The `CommandResult` wrapper ensures consistent error handling
+//! - The `CommandResult` type alias ensures consistent error handling
 //!
 //! # IPC Type Contracts
 //!
@@ -54,38 +54,12 @@ pub const MAX_QUERY_LEN: usize = 256;
 
 // ─── Command Result ───────────────────────────────────────────────
 
-/// A result type that serializes cleanly for Tauri IPC.
+/// A result type for Tauri command handlers.
 ///
-/// All Tauri commands return `CommandResult<T>` to ensure
-/// consistent error handling and frontend-friendly messages.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "status", content = "data")]
-pub enum CommandResult<T: Serialize> {
-    /// Operation succeeded with the given data.
-    Ok(T),
-    /// Operation failed with a user-safe error message.
-    Err(CommandError),
-}
-
-impl<T: Serialize> CommandResult<T> {
-    /// Creates a successful result.
-    pub fn ok(data: T) -> Self {
-        CommandResult::Ok(data)
-    }
-
-    /// Creates an error result from a KestrelError.
-    pub fn err(error: KestrelError) -> Self {
-        CommandResult::Err(CommandError::from_kestrel(error))
-    }
-
-    /// Creates an error result from a code and message.
-    pub fn err_msg(code: &str, message: &str) -> Self {
-        CommandResult::Err(CommandError {
-            code: code.to_string(),
-            message: message.to_string(),
-        })
-    }
-}
+/// Uses `Result<T, CommandError>` so the `?` operator works
+/// naturally. Tauri serializes `Ok` values directly and sends
+/// `Err` values through the error channel.
+pub type CommandResult<T> = Result<T, CommandError>;
 
 /// A user-safe error for the frontend.
 ///
@@ -145,9 +119,10 @@ impl CommandError {
     }
 }
 
-impl<T: Serialize> From<KestrelError> for CommandResult<T> {
+/// Allow `?` on `KestrelError` in functions returning `CommandResult<T>`.
+impl From<KestrelError> for CommandError {
     fn from(err: KestrelError) -> Self {
-        CommandResult::err(err)
+        CommandError::from_kestrel(err)
     }
 }
 
@@ -443,15 +418,15 @@ mod tests {
 
     #[test]
     fn command_result_ok() {
-        let result: CommandResult<String> = CommandResult::ok("hello".to_string());
-        assert!(matches!(result, CommandResult::Ok(_)));
+        let result: CommandResult<String> = Ok("hello".to_string());
+        assert!(result.is_ok());
     }
 
     #[test]
     fn command_result_err_from_kestrel() {
         let result: CommandResult<String> =
-            CommandResult::err(KestrelError::Unauthorized("test".to_string()));
-        assert!(matches!(result, CommandResult::Err(_)));
+            Err(CommandError::from_kestrel(KestrelError::Unauthorized("test".to_string())));
+        assert!(result.is_err());
     }
 
     #[test]

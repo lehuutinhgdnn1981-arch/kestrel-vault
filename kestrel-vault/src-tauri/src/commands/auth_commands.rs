@@ -506,11 +506,11 @@ pub fn auth_initialize_vault(
 ) -> CommandResult<VaultInitResponse> {
     // Validate inputs
     if let Err(e) = validate_master_password(&master_password) {
-        return CommandResult::Err(e);
+        return Err(e);
     }
     if let Some(ref h) = hint {
         if h.len() > 100 {
-            return CommandResult::Err(CommandError::validation(
+            return Err(CommandError::validation(
                 "Hint must be at most 100 characters",
             ));
         }
@@ -527,7 +527,7 @@ pub fn auth_initialize_vault(
         // secure_password is zeroized when it goes out of scope
         match result {
             Ok(r) => r,
-            Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+            Err(e) => return Err(CommandError::from_kestrel(e)),
         }
     };
 
@@ -554,7 +554,7 @@ pub fn auth_initialize_vault(
                 }
             }
             Err(e) => {
-                return CommandResult::Err(CommandError::from_kestrel(e));
+                return Err(CommandError::from_kestrel(e));
             }
         }
     }
@@ -593,7 +593,7 @@ pub fn auth_initialize_vault(
         MEMORY_COST, ITERATIONS, PARALLELISM
     );
 
-    CommandResult::ok(VaultInitResponse {
+    Ok(VaultInitResponse {
         initialized: true,
         state: VaultState::Locked.to_string(),
     })
@@ -628,7 +628,7 @@ pub fn auth_unlock(
 ) -> CommandResult<SessionResponse> {
     // Validate input
     if let Err(e) = validate_master_password(&master_password) {
-        return CommandResult::Err(e);
+        return Err(e);
     }
 
     // Guard: vault must be in Locked state
@@ -641,12 +641,12 @@ pub fn auth_unlock(
             std::process::exit(1);
         });
         if limiter.is_rate_limited(Operation::Login) {
-            return CommandResult::Err(CommandError::unauthorized(
+            return Err(CommandError::unauthorized(
                 "Too many login attempts. Please try again later.",
             ));
         }
         if let Err(e) = limiter.record_attempt(Operation::Login) {
-            return CommandResult::Err(CommandError::from_kestrel(e));
+            return Err(CommandError::from_kestrel(e));
         }
     }
 
@@ -683,7 +683,7 @@ pub fn auth_unlock(
                 // Parse salt from hex
                 let salt = match AppState::parse_salt_from_hex(&sh) {
                     Ok(s) => s,
-                    Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+                    Err(e) => return Err(CommandError::from_kestrel(e)),
                 };
 
                 // Convert password to SecureString for zeroization
@@ -754,7 +754,7 @@ pub fn auth_unlock(
                         }
                     }
                     Err(e) => {
-                        return CommandResult::Err(CommandError::from_kestrel(e));
+                        return Err(CommandError::from_kestrel(e));
                     }
                 }
             }
@@ -762,7 +762,7 @@ pub fn auth_unlock(
             // Create a new session
             let new_session = match Session::new(auto_lock_minutes) {
                 Ok(s) => s,
-                Err(e) => return CommandResult::Err(CommandError::from_kestrel(e)),
+                Err(e) => return Err(CommandError::from_kestrel(e)),
             };
             session_id = new_session.id().clone();
             expires_at = *new_session.expires_at();
@@ -796,7 +796,7 @@ pub fn auth_unlock(
 
             // TODO: Audit log: UnlockSucceeded
 
-            CommandResult::ok(SessionResponse {
+            Ok(SessionResponse {
                 session_id: session_id.to_string(),
                 expires_at: expires_at.to_rfc3339(),
                 is_unlocked: true,
@@ -827,13 +827,13 @@ pub fn auth_unlock(
 
             // TODO: Audit log: UnlockFailed
 
-            CommandResult::Err(CommandError::unauthorized(
+            Err(CommandError::unauthorized(
                 "Incorrect master password",
             ))
         }
         Err(e) => {
             // Other errors (crypto, config, etc.)
-            CommandResult::Err(CommandError::from_kestrel(e))
+            Err(CommandError::from_kestrel(e))
         }
     }
 }
@@ -878,7 +878,7 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
                 }
             }
             Err(e) => {
-                return CommandResult::Err(CommandError::from_kestrel(e));
+                return Err(CommandError::from_kestrel(e));
             }
         }
     }
@@ -926,7 +926,7 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
 
     tracing::info!("Vault locked — KEK and DEK zeroized, session destroyed");
 
-    CommandResult::ok(VaultLockResponse {
+    Ok(VaultLockResponse {
         state: VaultState::Locked.to_string(),
     })
 }
@@ -949,16 +949,16 @@ pub fn auth_get_session(
         Some(session) => {
             // Check if session is still valid
             if session.state() == SessionState::Unlocked {
-                CommandResult::ok(Some(SessionResponse {
+                Ok(Some(SessionResponse {
                     session_id: session.id().to_string(),
                     expires_at: session.expires_at().to_rfc3339(),
                     is_unlocked: true,
                 }))
             } else {
-                CommandResult::ok(None)
+                Ok(None)
             }
         }
-        None => CommandResult::ok(None),
+        None => Ok(None),
     }
 }
 
@@ -973,7 +973,7 @@ pub fn auth_is_vault_initialized(
         tracing::error!("Vault state machine lock poisoned: {}", e);
         std::process::exit(1);
     });
-    CommandResult::ok(sm.state() != VaultState::Uninitialized)
+    Ok(sm.state() != VaultState::Uninitialized)
 }
 
 /// Returns the current vault status with lockout information.
@@ -995,7 +995,7 @@ pub fn auth_get_vault_status(
 
     let is_locked_out = matches!(tracker.lockout_state(), LockoutState::LockedOut);
 
-    CommandResult::ok(VaultStatusResponse::from_state(
+    Ok(VaultStatusResponse::from_state(
         sm.state(),
         sm.failed_unlock_attempts(),
         is_locked_out,
@@ -1026,14 +1026,14 @@ pub fn auth_auto_lock_check(
             std::process::exit(1);
         });
         if sm.state() != VaultState::Unlocked {
-            return CommandResult::ok(false);
+            return Ok(false);
         }
     }
 
     // Validate session (this will auto-lock if expired)
     match state.validate_session() {
-        Ok(()) => CommandResult::ok(false),
-        Err(_) => CommandResult::ok(true), // Vault was auto-locked
+        Ok(()) => Ok(false),
+        Err(_) => Ok(true), // Vault was auto-locked
     }
 }
 
@@ -1068,10 +1068,10 @@ pub fn auth_change_password(
 ) -> CommandResult<()> {
     // Validate inputs
     if let Err(e) = validate_master_password(&current_password) {
-        return CommandResult::Err(e);
+        return Err(e);
     }
     if let Err(e) = validate_master_password(&new_password) {
-        return CommandResult::Err(e);
+        return Err(e);
     }
 
     // Guard: vault must be unlocked
@@ -1095,7 +1095,7 @@ pub fn auth_change_password(
             (Some(sh), Some(te)) => {
                 let salt = match AppState::parse_salt_from_hex(sh) {
                     Ok(s) => s,
-                    Err(_) => return CommandResult::Err(CommandError::from_kestrel(
+                    Err(_) => return Err(CommandError::from_kestrel(
                         KestrelError::Crypto("Invalid salt format".to_string()),
                     )),
                 };
@@ -1110,7 +1110,7 @@ pub fn auth_change_password(
     };
 
     if !current_key_verified {
-        return CommandResult::Err(CommandError::unauthorized(
+        return Err(CommandError::unauthorized(
             "Current password is incorrect",
         ));
     }
@@ -1189,7 +1189,7 @@ pub fn auth_change_password(
 
     tracing::info!("Master password changed — KEK/DEK rotation complete (O(1), no data re-encrypted)");
 
-    CommandResult::ok(())
+    Ok(())
 }
 
 #[cfg(test)]

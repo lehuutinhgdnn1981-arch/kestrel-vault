@@ -70,7 +70,7 @@ pub fn note_create(
     // Validate inputs
     validate_field(&title, MAX_TITLE_LEN, "Title")?;
     if content.is_empty() {
-        return CommandResult::Err(CommandError::validation("Content is required"));
+        return Err(CommandError::validation("Content is required"));
     }
     validate_field(&content, MAX_CONTENT_LEN, "Content")?;
     if let Some(ref fid) = folder_id {
@@ -91,7 +91,7 @@ pub fn note_create(
     })?;
 
     // Use VaultServiceImpl to create note
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     let folder_uuid = folder_id.and_then(|s| uuid::Uuid::parse_str(&s).ok());
 
     let row = crate::commands::async_runtime::block_on(async {
@@ -114,7 +114,7 @@ pub fn note_create(
         service.decrypt_note_title(&row.id, &row.title).await
     }).unwrap_or_else(|_| "<Encrypted>".to_string());
 
-    CommandResult::ok(SecureNoteResponse {
+    Ok(SecureNoteResponse {
         id: row.id,
         title: decrypted_title,
         has_content: !row.content.is_empty(),
@@ -153,7 +153,7 @@ pub fn note_list(
         CommandError::unauthorized("Database not available")
     })?;
 
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     let folder_uuid = folder_id.and_then(|s| uuid::Uuid::parse_str(&s).ok());
 
     let rows = crate::commands::async_runtime::block_on(async {
@@ -185,7 +185,7 @@ pub fn note_list(
         }
     }).collect();
 
-    CommandResult::ok(responses)
+    Ok(responses)
 }
 
 /// Gets a single secure note by ID.
@@ -219,7 +219,7 @@ pub fn note_get(
         CommandError::validation("Invalid note UUID")
     })?;
 
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     let row = crate::commands::async_runtime::block_on(async {
         service.get_note(note_id).await
     }).map_err(CommandError::from_kestrel)?;
@@ -238,7 +238,7 @@ pub fn note_get(
         service.decrypt_note_title(&row.id, &row.title).await
     }).unwrap_or_else(|_| "<Encrypted>".to_string());
 
-    CommandResult::ok(SecureNoteResponse {
+    Ok(SecureNoteResponse {
         id: row.id,
         title: decrypted_title,
         has_content: !row.content.is_empty(),
@@ -297,7 +297,7 @@ pub fn note_update(
         CommandError::validation("Invalid note UUID")
     })?;
 
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
 
     // Parse folder_id: Some("null") means remove from folder, Some(uuid) means assign
     let parsed_folder_id = folder_id.map(|fid| {
@@ -328,7 +328,7 @@ pub fn note_update(
         service.decrypt_note_title(&row.id, &row.title).await
     }).unwrap_or_else(|_| "<Encrypted>".to_string());
 
-    CommandResult::ok(SecureNoteResponse {
+    Ok(SecureNoteResponse {
         id: row.id,
         title: decrypted_title,
         has_content: !row.content.is_empty(),
@@ -358,7 +358,7 @@ pub fn note_delete(
 
     validate_uuid(&id, "id")?;
     if !confirm {
-        return CommandResult::Err(CommandError::validation(
+        return Err(CommandError::validation(
             "Deletion requires confirmation",
         ));
     }
@@ -374,7 +374,7 @@ pub fn note_delete(
         CommandError::validation("Invalid note UUID")
     })?;
 
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     crate::commands::async_runtime::block_on(async {
         service.delete_note(note_id).await
     }).map_err(CommandError::from_kestrel)?;
@@ -390,7 +390,7 @@ pub fn note_delete(
 
     tracing::info!("Secure note deleted: id={}", id);
 
-    CommandResult::ok(())
+    Ok(())
 }
 
 /// Reveals the content of a secure note.
@@ -431,7 +431,7 @@ pub fn note_reveal(
         CommandError::validation("Invalid note UUID")
     })?;
 
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     let (decrypted_title, decrypted_content) = crate::commands::async_runtime::block_on(async {
         service.reveal_note(note_id).await
     }).map_err(CommandError::from_kestrel)?;
@@ -457,7 +457,7 @@ pub fn note_reveal(
 
     tracing::warn!("Note content reveal completed for note: {}", id);
 
-    CommandResult::ok(SecureNoteRevealResponse {
+    Ok(SecureNoteRevealResponse {
         id,
         title: title_string,
         content: content_string,

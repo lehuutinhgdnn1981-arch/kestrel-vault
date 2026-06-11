@@ -1,0 +1,967 @@
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+101 |           validate_field(u, MAX_URL_LEN, "URL")?;
+    |                                                ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:104:50
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+104 |           validate_field(n, MAX_NOTES_LEN, "Notes")?;
+    |                                                    ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:107:40
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+107 |           validate_uuid(fid, "folder_id")?;
+    |                                          ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:110:39
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+110 |           validate_field(tag, 64, "Tag")?;
+    |                                         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:116:7
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+116 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:121:7
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+121 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:124:47
+    |
+124 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+124 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:137:43
+    |
+ 73 | / pub fn vault_create_entry(
+ 74 | |     title: String,
+ 75 | |     username: String,
+ 76 | |     password: String,
+...   |
+ 81 | |     state: State<'_, AppState>,
+ 82 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+137 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:188:29
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+187 |       // Guard: vault must be unlocked
+188 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:191:29
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+191 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:193:29
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+193 |       validate_uuid(&id, "id")?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:198:7
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+198 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:201:7
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+201 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:206:7
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+206 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:207:47
+    |
+207 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+207 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:210:43
+    |
+183 | / pub fn vault_get_entry(
+184 | |     id: String,
+185 | |     state: State<'_, AppState>,
+186 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+210 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:269:29
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+268 |       // Guard: vault must be unlocked
+269 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:272:29
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+272 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:274:29
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+274 |       validate_uuid(&id, "id")?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:276:50
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+276 |           validate_field(t, MAX_TITLE_LEN, "Title")?;
+    |                                                    ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:279:56
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+279 |           validate_field(u, MAX_USERNAME_LEN, "Username")?;
+    |                                                          ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:294:46
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+294 |           validate_field(u, MAX_URL_LEN, "URL")?;
+    |                                                ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:297:50
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+297 |           validate_field(n, MAX_NOTES_LEN, "Notes")?;
+    |                                                    ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:300:40
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+300 |           validate_uuid(fid, "folder_id")?;
+    |                                          ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:304:43
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+304 |               validate_field(tag, 64, "Tag")?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:311:7
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+311 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:316:7
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+316 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:321:7
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+321 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:329:20
+    |
+329 |           folder_id: folder_id.map(|fid| {
+    |  ____________________^
+330 | |             uuid::Uuid::parse_str(&fid).ok()
+331 | |         }),
+    | |__________^ expected `Option<Uuid>`, found `Option<Option<Uuid>>`
+    |
+    = note: expected enum `std::option::Option<Uuid>`
+               found enum `std::option::Option<std::option::Option<Uuid>>`
+help: consider using `Option::expect` to unwrap the `std::option::Option<std::option::Option<Uuid>>` value, panicking if the value is an `Option::None`
+    |
+331 |         }).expect("REASON"),
+    |           +++++++++++++++++
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:335:47
+    |
+335 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+335 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:338:43
+    |
+257 | / pub fn vault_update_entry(
+258 | |     id: String,
+259 | |     title: Option<String>,
+260 | |     username: Option<String>,
+...   |
+266 | |     state: State<'_, AppState>,
+267 | | ) -> CommandResult<VaultEntryResponse> {
+    | |______________________________________- this function should return `Result` or `Option` to accept `?`
+...
+338 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<VaultEntryResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:389:29
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+388 |       // Guard: vault must be unlocked
+389 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:392:29
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+392 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:394:29
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+394 |       validate_uuid(&id, "id")?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:404:7
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+404 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:407:7
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+407 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:412:7
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+412 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:413:47
+    |
+413 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+413 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:416:43
+    |
+383 | / pub fn vault_delete_entry(
+384 | |     id: String,
+385 | |     confirm: bool,
+386 | |     state: State<'_, AppState>,
+387 | | ) -> CommandResult<()> {
+    | |______________________- this function should return `Result` or `Option` to accept `?`
+...
+416 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<()>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:457:29
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+456 |       // Guard: vault must be unlocked
+457 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:460:29
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+460 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:463:40
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+463 |           validate_uuid(fid, "folder_id")?;
+    |                                          ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:471:7
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+471 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:474:7
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+474 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:477:47
+    |
+477 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+477 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:481:43
+    |
+450 | / pub fn vault_list_entries(
+451 | |     folder_id: Option<String>,
+452 | |     limit: Option<i64>,
+453 | |     offset: Option<i64>,
+454 | |     state: State<'_, AppState>,
+455 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+481 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:533:29
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+532 |       // Guard: vault must be unlocked
+533 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:536:29
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+536 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:538:41
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+538 |       validate_field(&query, 256, "Query")?;
+    |                                           ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:544:7
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+544 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:547:7
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+547 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:550:47
+    |
+550 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+550 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:553:43
+    |
+527 | / pub fn vault_search_entries(
+528 | |     query: String,
+529 | |     limit: Option<i64>,
+530 | |     state: State<'_, AppState>,
+531 | | ) -> CommandResult<Vec<VaultEntryResponse>> {
+    | |___________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+553 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<Vec<VaultEntryResponse>>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:606:29
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+605 |       // Guard: vault must be unlocked
+606 |       state.require_unlocked()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:609:29
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+609 |       state.validate_session()?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:611:29
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+611 |       validate_uuid(&id, "id")?;
+    |                               ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:616:7
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+616 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:619:7
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+619 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:624:7
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+624 |       })?;
+    |         ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0308]: mismatched types                              
+   --> src\commands\vault_commands.rs:625:47
+    |
+625 |     let service = VaultServiceImpl::new(&dek, pool);
+    |                   ---------------------       ^^^^ expected `&Pool<Sqlite>`, found `Pool<Sqlite>`
+    |                   |
+    |                   arguments to this function are incorrect
+    |
+    = note: expected reference `&Pool<_>`
+                  found struct `Pool<_>`
+note: associated function defined here
+   --> src\vault\service.rs:90:12
+    |
+ 90 |     pub fn new(dek: &'a DataEncryptionKey, pool: &'a SqlitePool) -> Self {
+    |            ^^^                             --------------------
+help: consider borrowing here
+    |
+625 |     let service = VaultServiceImpl::new(&dek, &pool);
+    |                                               +
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:628:43
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+628 |       }).map_err(CommandError::from_kestrel)?;
+    |                                             ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0277]: the `?` operator can only be used in a function that returns `Result` or `Option` (or another type that implements `FromResidual`)
+   --> src\commands\vault_commands.rs:634:11
+    |
+601 | / pub fn vault_reveal_password(
+602 | |     id: String,
+603 | |     state: State<'_, AppState>,
+604 | | ) -> CommandResult<PasswordRevealResponse> {
+    | |__________________________________________- this function should return `Result` or `Option` to accept `?`
+...
+634 |           ))?;
+    |             ^ cannot use the `?` operator in a function that returns `CommandResult<PasswordRevealResponse>`
+
+error[E0369]: binary operation `==` cannot be applied to type `AadContext`
+   --> src\crypto\envelope.rs:130:5
+    |
+121 | #[derive(Debug, Clone, PartialEq, Eq)]
+    |                        --------- in this derive macro expansion
+...
+130 |     aad_context: AadContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: an implementation of `PartialEq` might be missing for `AadContext`
+   --> src\crypto\envelope.rs:82:1
+    |
+ 82 | pub struct AadContext {
+    | ^^^^^^^^^^^^^^^^^^^^^ must implement `PartialEq`
+help: consider annotating `AadContext` with `#[derive(PartialEq)]`
+    |
+ 82 + #[derive(PartialEq)]
+ 83 | pub struct AadContext {
+    |
+
+error[E0277]: the trait bound `AadContext: Eq` is not satisfied
+   --> src\crypto\envelope.rs:130:5
+    |
+121 | #[derive(Debug, Clone, PartialEq, Eq)]
+    |                                   -- in this derive macro expansion
+...
+130 |     aad_context: AadContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^ the trait `Eq` is not implemented for `AadContext`
+    |
+note: required by a bound in `std::cmp::AssertParamIsEq`
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\cmp.rs:379:0
+help: consider annotating `AadContext` with `#[derive(Eq)]`
+    |
+ 82 + #[derive(Eq)]
+ 83 | pub struct AadContext {
+    |
+
+error[E0599]: no method named `num_active` found for struct `Pool<DB>` in the current scope
+   --> src\db\connection.rs:235:38
+    |
+235 |         self.pool.size() - self.pool.num_active()
+    |                                      ^^^^^^^^^^ method not found in `Pool<Sqlite>`
+
+warning: unused variable: `secs`                            
+   --> src\commands\auth_commands.rs:188:35
+    |
+188 |             LockoutState::Delayed(secs) => {
+    |                                   ^^^^ help: if this is intentional, prefix it with an underscore: `_secs`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+error[E0521]: borrowed data escapes outside of function     
+   --> src\crypto\subkeys.rs:180:8
+    |
+159 | fn derive_subkey(dek: &DerivedKey, info: &[u8]) -> KestrelResult<SubKey> {
+    |                                    ----  - let's call the lifetime of this reference `'1`
+    |                                    |
+    |                                    `info` is a reference that is only valid in the function body
+...
+180 |     Ok(SubKey::new(subkey_bytes, purpose))
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |        |
+    |        `info` escapes the function body here
+    |        argument requires that `'1` must outlive `'static`
+
+warning: unused variable: `param_idx`                       
+   --> src\db\folder_repo.rs:143:13
+    |
+143 |         let param_idx = 2; // Start after id
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_param_idx`
+
+warning: unused variable: `sql`                             
+   --> src\db\folder_repo.rs:157:17
+    |
+157 |             let sql = format!(
+    |                 ^^^ help: if this is intentional, prefix it with an underscore: `_sql`
+
+Some errors have detailed explanations: E0277, E0308, E0369, E0425, E0432, E0509, E0521, E0599, E0609...
+For more information about an error, try `rustc --explain E0277`.
+warning: `kestrel-vault` (lib) generated 22 warnings        
+error: could not compile `kestrel-vault` (lib) due to 227 previous errors; 22 warnings emitted

@@ -96,7 +96,7 @@ pub fn audit_query_events(
                         })
                         .collect();
 
-                    CommandResult::ok(AuditPageResponse {
+                    Ok(AuditPageResponse {
                         events: responses,
                         total_count,
                         has_more,
@@ -106,7 +106,7 @@ pub fn audit_query_events(
                     tracing::warn!("Audit query failed: {}", e);
                     // Return empty result rather than error — audit should
                     // always be available for visibility
-                    CommandResult::ok(AuditPageResponse {
+                    Ok(AuditPageResponse {
                         events: Vec::new(),
                         total_count: 0,
                         has_more: false,
@@ -117,7 +117,7 @@ pub fn audit_query_events(
         None => {
             // Database not available — return empty results
             // This happens when vault hasn't been unlocked yet
-            CommandResult::ok(AuditPageResponse {
+            Ok(AuditPageResponse {
                 events: Vec::new(),
                 total_count: 0,
                 has_more: false,
@@ -144,7 +144,7 @@ pub fn audit_export_events(
 ) -> CommandResult<String> {
     let valid_formats = ["json", "csv"];
     if !valid_formats.contains(&format.as_str()) {
-        return CommandResult::Err(CommandError::validation(
+        return Err(CommandError::validation(
             "Format must be 'json' or 'csv'",
         ));
     }
@@ -223,15 +223,15 @@ pub fn audit_export_events(
 
                     tracing::info!("Audit events exported: format={}, count={}", format, filtered.len());
 
-                    CommandResult::ok(output)
+                    Ok(output)
                 }
                 Err(e) => {
-                    CommandResult::Err(CommandError::from_kestrel(e))
+                    Err(CommandError::from_kestrel(e))
                 }
             }
         }
         None => {
-            CommandResult::Err(CommandError::unauthorized(
+            Err(CommandError::unauthorized(
                 "Database not available — unlock the vault first",
             ))
         }

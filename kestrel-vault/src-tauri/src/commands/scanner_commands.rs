@@ -52,7 +52,7 @@ pub fn scanner_password_strength(
     // This does NOT access vault data, only the provided password
 
     if password.is_empty() {
-        return CommandResult::Err(CommandError::validation(
+        return Err(CommandError::validation(
             "Password is required for analysis",
         ));
     }
@@ -75,7 +75,7 @@ pub fn scanner_password_strength(
     // SecureString, but Tauri IPC passes strings immutably.
     let _ = SecureString::from(password); // Force zeroization
 
-    CommandResult::ok(PasswordStrengthResponse {
+    Ok(PasswordStrengthResponse {
         score,
         label,
         entropy_bits: analysis.entropy_bits,
@@ -115,7 +115,7 @@ pub fn scanner_check_breach(
         .map_err(CommandError::from_kestrel)?;
 
     if result.is_breached {
-        CommandResult::ok(Some(VulnerabilityItemResponse {
+        Ok(Some(VulnerabilityItemResponse {
             id: uuid::Uuid::new_v4().to_string(),
             threat_level: result.threat_level.to_string(),
             description: result.message,
@@ -123,7 +123,7 @@ pub fn scanner_check_breach(
             entry_id: None,
         }))
     } else {
-        CommandResult::ok(None)
+        Ok(None)
     }
 }
 
@@ -163,7 +163,7 @@ pub fn scanner_run_full_scan(
     })?;
 
     // Load all vault entries
-    let service = VaultServiceImpl::new(&dek, pool);
+    let service = VaultServiceImpl::new(&dek, &pool);
     let entries = crate::commands::async_runtime::block_on(async {
         service.list_entries(None, 10000, 0).await
     }).map_err(CommandError::from_kestrel)?;
@@ -258,5 +258,5 @@ pub fn scanner_run_full_scan(
         sm.record_activity();
     }
 
-    CommandResult::ok(responses)
+    Ok(responses)
 }

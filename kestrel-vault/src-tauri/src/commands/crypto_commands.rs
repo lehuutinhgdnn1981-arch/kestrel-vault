@@ -39,7 +39,7 @@ pub fn crypto_derive_key(
     // Instead, derive the key internally and return a handle
     // The frontend should never see key material
 
-    CommandResult::Err(CommandError::validation(
+    Err(CommandError::validation(
         "Direct key derivation is not available via IPC. Use auth_unlock instead.",
     ))
 }
@@ -65,7 +65,7 @@ pub fn crypto_encrypt_data(
     // TODO: Return base64-encoded envelope
     // TODO: Audit log: DataEncrypted
 
-    CommandResult::Err(CommandError::validation(
+    Err(CommandError::validation(
         "Direct encryption is not available via IPC. Use domain-specific commands instead.",
     ))
 }
@@ -92,7 +92,7 @@ pub fn crypto_decrypt_data(
     // TODO: Decrypt using open_envelope
     // TODO: Return plaintext
 
-    CommandResult::Err(CommandError::validation(
+    Err(CommandError::validation(
         "Direct decryption is not available via IPC. Use domain-specific commands instead.",
     ))
 }
