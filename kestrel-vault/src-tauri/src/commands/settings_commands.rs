@@ -14,7 +14,6 @@ use crate::commands::types::{
     validate_field, AppSettingsResponse, CommandError, CommandResult,
 };
 use crate::config::AppConfig;
-use std::sync::RwLock;
 use tauri::State;
 
 use super::auth_commands::AppState;
@@ -28,9 +27,11 @@ pub fn settings_get(
     state: State<'_, AppState>,
 ) -> CommandResult<AppSettingsResponse> {
     // Settings are always readable — no state guard needed
-    // TODO: Load from AppConfig stored in AppState
-    // For now, return defaults from AppConfig
-    let config = AppConfig::default();
+    // Read the live configuration from AppState
+    let config = state.config.read().unwrap_or_else(|e| {
+        tracing::error!("Config lock poisoned: {}", e);
+        std::process::exit(1);
+    });
 
     CommandResult::ok(AppSettingsResponse {
         auto_lock_minutes: config.auto_lock_minutes,
@@ -85,7 +86,6 @@ pub fn settings_update(
     }
 
     // Validate numeric ranges (using AppConfig clamping rules)
-    let config = AppConfig::default();
     if let Some(mins) = auto_lock_minutes {
         if mins < 1 || mins > 480 {
             return CommandResult::Err(CommandError::validation(
@@ -101,24 +101,47 @@ pub fn settings_update(
         }
     }
 
-    // TODO: Load current config from AppState
-    // TODO: Apply partial updates
-    // TODO: Save to config file/database via AppConfig
+    // ── Apply partial updates to AppState config ──
+    // All changes are applied atomically within a single write lock.
+    // The config is validated before committing to ensure consistency.
+    let updated_response = {
+        let mut config_guard = state.config.write().unwrap_or_else(|e| {
+            tracing::error!("Config lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+
+        // Apply partial updates (only provided fields are changed)
+        if let Some(mins) = auto_lock_minutes {
+            config_guard.auto_lock_minutes = mins;
+        }
+        if let Some(ref t) = theme {
+            config_guard.theme = t.clone();
+        }
+        if let Some(ref l) = language {
+            config_guard.language = l.clone();
+        }
+        if let Some(secs) = clear_clipboard_seconds {
+            config_guard.clear_clipboard_seconds = secs;
+        }
+
+        // Validate the updated config (clamps any out-of-range values)
+        config_guard.validate();
+
+        // Build response from the actual (validated) config
+        AppSettingsResponse {
+            auto_lock_minutes: config_guard.auto_lock_minutes,
+            theme: config_guard.theme.clone(),
+            language: config_guard.language.clone(),
+            clear_clipboard_seconds: config_guard.clear_clipboard_seconds,
+        }
+    };
+
+    // TODO: Persist config to file/database via AppConfig::save()
     // TODO: Audit log: SettingsChanged { changed_fields }
 
-    // Build response with applied changes
-    let current_config = AppConfig::default();
-    let auto_lock = auto_lock_minutes.unwrap_or(current_config.auto_lock_minutes);
-    let theme_val = theme.unwrap_or_else(|| current_config.theme.clone());
-    let lang = language.unwrap_or_else(|| current_config.language.clone());
-    let clipboard_secs = clear_clipboard_seconds.unwrap_or(current_config.clear_clipboard_seconds);
+    tracing::info!("Settings updated");
 
-    CommandResult::ok(AppSettingsResponse {
-        auto_lock_minutes: auto_lock,
-        theme: theme_val,
-        language: lang,
-        clear_clipboard_seconds: clipboard_secs,
-    })
+    CommandResult::ok(updated_response)
 }
 
 #[cfg(test)]
