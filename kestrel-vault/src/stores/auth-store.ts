@@ -8,11 +8,12 @@
  *   Rust backend validates on every command
  * - Auto-lock is tracked here but the actual lock
  *   operation goes through Tauri to Rust
+ * - Vault status is polled from Rust VaultStateMachine
  */
 
 import { create } from "zustand";
-import { authCommands, type SessionInfo } from "@/lib/tauri";
-import type { AppState, UnlockState } from "@/types/app";
+import { authCommands, type SessionInfo, type VaultStatus } from "@/lib/tauri";
+import type { AppState, UnlockState, VaultLifecycleState } from "@/types/app";
 import { DEFAULT_SETTINGS, TIMEOUTS } from "@/lib/constants";
 
 interface AuthState {
@@ -24,6 +25,12 @@ interface AuthState {
   session: SessionInfo | null;
   /** Whether the vault has been initialized (first-run) */
   isInitialized: boolean | null;
+  /** Vault lifecycle state from Rust VaultStateMachine */
+  vaultState: VaultLifecycleState | null;
+  /** Number of failed unlock attempts in current locked period */
+  failedUnlockAttempts: number;
+  /** Whether the user is currently locked out */
+  isLockedOut: boolean;
   /** Lockout countdown in seconds (0 = not locked out) */
   lockoutSeconds: number;
   /** Last activity timestamp */
@@ -44,6 +51,9 @@ interface AuthActions {
   /** Lock the vault */
   lock: () => Promise<void>;
 
+  /** Fetch vault status from Rust backend */
+  refreshVaultStatus: () => Promise<void>;
+
   /** Record user activity for auto-lock tracking */
   recordActivity: () => void;
 
@@ -62,6 +72,9 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   unlockState: "idle",
   session: null,
   isInitialized: null,
+  vaultState: null,
+  failedUnlockAttempts: 0,
+  isLockedOut: false,
   lockoutSeconds: 0,
   lastActivity: Date.now(),
   autoLockMinutes: DEFAULT_SETTINGS.autoLockMinutes,
@@ -71,9 +84,10 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
     try {
       set({ appState: "initializing" });
 
-      const [isInitialized, session] = await Promise.all([
+      const [isInitialized, session, vaultStatus] = await Promise.all([
         authCommands.isVaultInitialized(),
         authCommands.getSession(),
+        authCommands.getVaultStatus(),
       ]);
 
       if (session?.is_unlocked) {
@@ -81,12 +95,18 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           appState: "unlocked",
           session,
           isInitialized: true,
+          vaultState: vaultStatus.state,
+          failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
+          isLockedOut: vaultStatus.is_locked_out,
           lastActivity: Date.now(),
         });
       } else {
         set({
           appState: isInitialized ? "locked" : "locked",
           isInitialized,
+          vaultState: vaultStatus.state,
+          failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
+          isLockedOut: vaultStatus.is_locked_out,
         });
       }
     } catch (error) {
@@ -107,6 +127,9 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         appState: "unlocked",
         unlockState: "success",
         session,
+        vaultState: "Unlocked",
+        failedUnlockAttempts: 0,
+        isLockedOut: false,
         lastActivity: Date.now(),
       });
 
@@ -118,10 +141,21 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       const message =
         error instanceof Error ? error.message : "Unlock failed";
 
-      set({
-        unlockState: "failed",
-        error: message,
-      });
+      // Refresh vault status to get updated failed attempt count
+      try {
+        const vaultStatus = await authCommands.getVaultStatus();
+        set({
+          unlockState: "failed",
+          error: message,
+          failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
+          isLockedOut: vaultStatus.is_locked_out,
+        });
+      } catch {
+        set({
+          unlockState: "failed",
+          error: message,
+        });
+      }
 
       // Reset unlock state
       setTimeout(() => {
@@ -138,6 +172,21 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
     }
 
     get().resetOnLock();
+  },
+
+  refreshVaultStatus: async () => {
+    try {
+      const vaultStatus = await authCommands.getVaultStatus();
+      set({
+        vaultState: vaultStatus.state,
+        isInitialized: vaultStatus.is_initialized,
+        failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
+        isLockedOut: vaultStatus.is_locked_out,
+        appState: vaultStatus.is_unlocked ? "unlocked" : "locked",
+      });
+    } catch {
+      // Silently fail — don't disrupt the UI for status check failures
+    }
   },
 
   recordActivity: () => {
@@ -157,6 +206,9 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       appState: "locked",
       unlockState: "idle",
       session: null,
+      vaultState: "Locked",
+      failedUnlockAttempts: 0,
+      isLockedOut: false,
       lastActivity: 0,
       error: null,
     });

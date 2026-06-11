@@ -10,6 +10,28 @@ export type UnlockState = "idle" | "unlocking" | "success" | "failed";
 
 export type LockState = "unlocked" | "locking" | "locked";
 
+/**
+ * Vault lifecycle states — mirrors Rust's VaultState enum.
+ *
+ * These are the only valid states for the vault lifecycle.
+ * The frontend should use these to drive UI state rendering.
+ */
+export type VaultLifecycleState = "Uninitialized" | "Locked" | "Unlocked";
+
+/**
+ * Vault status response — mirrors Rust's VaultStatusResponse.
+ *
+ * Contains NO secrets — only lifecycle state metadata.
+ * Used by the frontend to determine which UI to render.
+ */
+export interface VaultStatusInfo {
+  state: VaultLifecycleState;
+  is_initialized: boolean;
+  is_unlocked: boolean;
+  failed_unlock_attempts: number;
+  is_locked_out: boolean;
+}
+
 // ─── Theme & Language ──────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";

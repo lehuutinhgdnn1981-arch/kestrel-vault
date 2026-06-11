@@ -260,3 +260,38 @@ Stage Summary:
 - Complete module API documentation with dependency graph
 - IPC security model with never-send/allowed/conditional data rules
 - 22-command inventory documented
+
+---
+Task ID: 1.1b
+Agent: Main Orchestrator
+Task: Phase 01 deepening — Encryption envelope, state machine, typed commands, repos, docs
+
+Work Log:
+- Enhanced crypto/envelope.rs (from Phase 00 skeleton → full implementation with AAD context binding)
+- Created security/vault_state.rs: VaultStateMachine with full lifecycle (Uninitialized→Locked→Unlocked), guards, events
+- Rewrote commands/auth_commands.rs: AppState with VaultStateMachine/RateLimiter/LockoutTracker, state guards (require_state, require_unlocked, check_lockout), 7 auth commands including auth_get_vault_status
+- Rewrote commands/vault_commands.rs: All 7 vault commands with require_unlocked() guard, typed IPC contracts
+- Rewrote commands/scanner_commands.rs: Proper state guards (strength=any, breach/scan=unlocked)
+- Updated commands/settings_commands.rs: require_unlocked() guard for writes, AppConfig integration
+- Enhanced commands/types.rs: Added VaultStatusResponse, VaultInitResponse, VaultLockResponse, request types (InitializeVaultRequest, UnlockVaultRequest, ChangePasswordRequest), FolderResponse, SecureNoteResponse, SecureNoteRevealResponse, FileEntryResponse, SecurityScoreResponse, SecurityBreakdown
+- Created db/folder_repo.rs: FolderRepo with CRUD, list_root, list_by_parent, count_entries, would_create_cycle
+- Created db/secure_note_repo.rs: SecureNoteRepo with CRUD, list_by_folder, count
+- Created db/file_entry_repo.rs: FileEntryRepo with CRUD, list_by_folder, count
+- Updated db/mod.rs: Added folder_repo, secure_note_repo, file_entry_repo modules and re-exports
+- Updated migrations/001_initial.sql: Added test_envelope and hint columns to vault_meta
+- Updated lib.rs: Registered auth_get_vault_status (23 commands total)
+- Updated docs/architecture/module-contracts.md: All new types, AppState schema, state guards, 6 repos
+- Updated docs/security-notes/ipc-model.md: 7 auth commands (was 6), auth_get_vault_status
+- Updated src/lib/tauri.ts: Added VaultStatus, VaultInitResult, VaultLockResult, PasswordRevealResult, SecurityScore, SecureNoteView, FileEntryView types; auth_get_vault_status command; proper IPC contract docs
+- Updated src/types/app.ts: Added VaultLifecycleState and VaultStatusInfo types
+- Updated src/stores/auth-store.ts: Integrated VaultStatus polling, failedUnlockAttempts, isLockedOut tracking
+- ~35 unit tests across vault_state (14), auth_commands (7), types (10+), folder_repo, secure_note_repo, file_entry_repo
+
+Stage Summary:
+- Phase 01 Architecture deepening COMPLETE
+- 23 Tauri commands (7 auth + 7 vault + 2 audit + 3 scanner + 3 crypto + 2 settings)
+- 6 database repositories (VaultEntry, AuditEvent, VaultMeta, Folder, SecureNote, FileEntry)
+- Vault lifecycle state machine enforcing Uninitialized→Locked→Unlocked transitions
+- All commands have state guards and typed IPC contracts
+- Frontend IPC layer synchronized with Rust backend types
+- Security model: React = untrusted, Rust = trusted, all calls through centralized tauri.ts

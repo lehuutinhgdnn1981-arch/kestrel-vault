@@ -4,6 +4,17 @@
  * IMPORTANT: React NEVER calls invoke directly from components.
  * All Tauri API calls are centralized here with type-safe wrappers.
  * React NEVER owns encryption keys — all crypto goes through Rust.
+ *
+ * # IPC Contract
+ *
+ * | Category   | Required State | Notes                            |
+ * |------------|---------------|----------------------------------|
+ * | Auth       | Varies        | init=Uninitialized, unlock=Locked |
+ * | Vault CRUD | Unlocked      | All require unlocked vault        |
+ * | Audit      | Any           | Security visibility always        |
+ * | Scanner    | Varies        | strength=Any, others=Unlocked     |
+ * | Settings   | Varies        | read=Any, write=Unlocked          |
+ * | Crypto     | Blocked       | Use domain commands instead       |
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -49,7 +60,7 @@ async function safeInvoke<T>(
   }
 }
 
-// ─── Vault Commands ────────────────────────────────────────────────
+// ─── Vault Entry Types ────────────────────────────────────────────
 
 export interface VaultEntryView {
   id: string;
@@ -85,32 +96,70 @@ export interface UpdateEntryPayload {
   totp_secret?: string | null;
 }
 
+export interface PasswordRevealResult {
+  password: string;
+  auto_clear_seconds: number;
+}
+
 export const vaultCommands = {
-  listEntries: (folderId?: string): Promise<VaultEntryView[]> =>
-    safeInvoke("vault_list_entries", { folderId }),
+  listEntries: (folderId?: string, limit?: number, offset?: number): Promise<VaultEntryView[]> =>
+    safeInvoke("vault_list_entries", { folderId, limit, offset }),
 
   getEntry: (id: string): Promise<VaultEntryView> =>
     safeInvoke("vault_get_entry", { id }),
 
-  createEntry: (payload: CreateEntryPayload): Promise<VaultEntryView> =>
-    safeInvoke("vault_create_entry", { payload }),
+  createEntry: (
+    title: string,
+    username: string,
+    password: string,
+    url?: string,
+    notes?: string,
+    folderId?: string,
+    tags?: string[],
+  ): Promise<VaultEntryView> =>
+    safeInvoke("vault_create_entry", {
+      title,
+      username,
+      password,
+      url: url ?? null,
+      notes: notes ?? null,
+      folderId: folderId ?? null,
+      tags: tags ?? [],
+    }),
 
-  updateEntry: (payload: UpdateEntryPayload): Promise<VaultEntryView> =>
-    safeInvoke("vault_update_entry", { payload }),
+  updateEntry: (
+    id: string,
+    updates: {
+      title?: string;
+      username?: string;
+      password?: string;
+      url?: string;
+      notes?: string;
+      folderId?: string;
+      tags?: string[];
+    },
+  ): Promise<VaultEntryView> =>
+    safeInvoke("vault_update_entry", {
+      id,
+      title: updates.title,
+      username: updates.username,
+      password: updates.password,
+      url: updates.url,
+      notes: updates.notes,
+      folderId: updates.folderId,
+      tags: updates.tags,
+    }),
 
-  deleteEntry: (id: string): Promise<void> =>
-    safeInvoke("vault_delete_entry", { id }),
+  deleteEntry: (id: string, confirm: boolean): Promise<void> =>
+    safeInvoke("vault_delete_entry", { id, confirm }),
 
-  /** Request password reveal — returns the decrypted password from Rust */
-  revealPassword: (id: string): Promise<string> =>
+  /** Request password reveal — returns the decrypted password from Rust.
+   *  Auto-clears after auto_clear_seconds. */
+  revealPassword: (id: string): Promise<PasswordRevealResult> =>
     safeInvoke("vault_reveal_password", { id }),
 
-  /** Request TOTP code — generated in Rust, never stores the secret in JS */
-  generateTotp: (id: string): Promise<string> =>
-    safeInvoke("vault_generate_totp", { id }),
-
-  searchEntries: (query: string): Promise<VaultEntryView[]> =>
-    safeInvoke("vault_search_entries", { query }),
+  searchEntries: (query: string, limit?: number): Promise<VaultEntryView[]> =>
+    safeInvoke("vault_search_entries", { query, limit }),
 } as const;
 
 // ─── Auth Commands ─────────────────────────────────────────────────
@@ -121,21 +170,51 @@ export interface SessionInfo {
   is_unlocked: boolean;
 }
 
+export interface VaultStatus {
+  state: string;
+  is_initialized: boolean;
+  is_unlocked: boolean;
+  failed_unlock_attempts: number;
+  is_locked_out: boolean;
+}
+
+export interface VaultInitResult {
+  initialized: boolean;
+  state: string;
+}
+
+export interface VaultLockResult {
+  state: string;
+}
+
 export const authCommands = {
+  /** Initialize vault for the first time. Requires Uninitialized state. */
+  initializeVault: (masterPassword: string, hint?: string): Promise<VaultInitResult> =>
+    safeInvoke("auth_initialize_vault", { masterPassword, hint }),
+
+  /** Unlock vault with master password. Requires Locked state. */
   unlock: (masterPassword: string): Promise<SessionInfo> =>
     safeInvoke("auth_unlock", { masterPassword }),
 
-  lock: (): Promise<void> =>
+  /** Lock vault immediately. Requires Unlocked state. */
+  lock: (): Promise<VaultLockResult> =>
     safeInvoke("auth_lock"),
 
+  /** Get current session info (null if locked). Available in any state. */
   getSession: (): Promise<SessionInfo | null> =>
     safeInvoke("auth_get_session"),
 
+  /** Check if vault has been initialized. Available in any state. */
   isVaultInitialized: (): Promise<boolean> =>
     safeInvoke("auth_is_vault_initialized"),
 
-  initializeVault: (masterPassword: string, hint?: string): Promise<void> =>
-    safeInvoke("auth_initialize_vault", { masterPassword, hint }),
+  /** Get vault status with lockout info. Available in any state. */
+  getVaultStatus: (): Promise<VaultStatus> =>
+    safeInvoke("auth_get_vault_status"),
+
+  /** Change master password. Requires Unlocked state. */
+  changePassword: (currentPassword: string, newPassword: string): Promise<void> =>
+    safeInvoke("auth_change_password", { currentPassword, newPassword }),
 } as const;
 
 // ─── Folder Commands ───────────────────────────────────────────────
@@ -160,23 +239,34 @@ export const folderCommands = {
 
 // ─── Scanner Commands ──────────────────────────────────────────────
 
+export interface PasswordStrengthResult {
+  score: number;
+  label: string;
+  entropy_bits: number;
+  warnings: string[];
+  suggestions: string[];
+}
+
 export interface ScanResultView {
   id: string;
   threat_level: string;
   description: string;
   recommendation: string;
-  scanned_at: string;
+  entry_id: string | null;
 }
 
 export const scannerCommands = {
-  runFullScan: (): Promise<ScanResultView[]> =>
-    safeInvoke("scanner_run_full_scan"),
+  /** Analyze password strength. Available in any state. */
+  getPasswordStrength: (password: string): Promise<PasswordStrengthResult> =>
+    safeInvoke("scanner_password_strength", { password }),
 
+  /** Check breach database. Requires Unlocked state. */
   checkBreach: (username: string): Promise<ScanResultView | null> =>
     safeInvoke("scanner_check_breach", { username }),
 
-  getPasswordStrength: (password: string): Promise<unknown> =>
-    safeInvoke("scanner_password_strength", { password }),
+  /** Run comprehensive vulnerability scan. Requires Unlocked state. */
+  runFullScan: (): Promise<ScanResultView[]> =>
+    safeInvoke("scanner_run_full_scan"),
 } as const;
 
 // ─── Audit Commands ────────────────────────────────────────────────
@@ -185,7 +275,7 @@ export interface AuditEventView {
   id: string;
   category: string;
   action: string;
-  description: string;
+  subject: string;
   timestamp: string;
 }
 
@@ -196,15 +286,17 @@ export interface AuditPage {
 }
 
 export const auditCommands = {
+  /** Query audit events. Available in any state. */
   queryEvents: (params: {
     category?: string;
     from?: string;
     to?: string;
     limit?: number;
-    cursor?: string;
+    offset?: number;
   }): Promise<AuditPage> =>
-    safeInvoke("audit_query_events", { params }),
+    safeInvoke("audit_query_events", { ...params }),
 
+  /** Export audit events to JSON or CSV. Rate-limited. */
   exportEvents: (format: string, from?: string, to?: string): Promise<string> =>
     safeInvoke("audit_export_events", { format, from, to }),
 } as const;
@@ -219,9 +311,54 @@ export interface AppSettings {
 }
 
 export const settingsCommands = {
+  /** Get current settings. Available in any state. */
   getSettings: (): Promise<AppSettings> =>
     safeInvoke("settings_get"),
 
+  /** Update settings. Requires Unlocked state. */
   updateSettings: (settings: Partial<AppSettings>): Promise<AppSettings> =>
-    safeInvoke("settings_update", { settings }),
+    safeInvoke("settings_update", { ...settings }),
 } as const;
+
+// ─── Security Score ────────────────────────────────────────────────
+
+export interface SecurityScore {
+  score: number;
+  label: string;
+  breakdown: {
+    password_health: number;
+    breach_status: number;
+    vault_hygiene: number;
+    audit_compliance: number;
+  };
+}
+
+// ─── Secure Notes ──────────────────────────────────────────────────
+
+export interface SecureNoteView {
+  id: string;
+  title: string;
+  has_content: boolean;
+  folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecureNoteRevealResult {
+  id: string;
+  title: string;
+  content: string;
+  auto_clear_seconds: number;
+}
+
+// ─── File Entries ──────────────────────────────────────────────────
+
+export interface FileEntryView {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
