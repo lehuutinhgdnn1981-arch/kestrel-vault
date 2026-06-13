@@ -68,7 +68,7 @@ impl Salt {
 /// The key material is wrapped in `Secret` to prevent accidental
 /// exposure through logging or debug output. When this value is
 /// dropped, the key material is securely erased from memory.
-#[derive(Clone, Zeroize)]
+#[derive(Zeroize)]
 #[zeroize(drop)]
 pub struct DerivedKey {
     /// The raw key bytes, protected by secrecy and zeroize.
@@ -78,6 +78,17 @@ pub struct DerivedKey {
 // Implement CloneableSecret so that SecretBox<DerivedKey> can be cloned.
 // This is required by the secrecy crate for SecretBox::clone().
 impl CloneableSecret for DerivedKey {}
+
+// Manual Clone impl because derive(Clone) fails:
+// SecretBox<[u8; 32]> requires [u8; 32]: CloneableSecret (orphan rule),
+// so we clone by exposing the secret and wrapping in a new SecretBox.
+impl Clone for DerivedKey {
+    fn clone(&self) -> Self {
+        DerivedKey {
+            key: SecretBox::new(Box::new(*self.key.expose_secret())),
+        }
+    }
+}
 
 impl DerivedKey {
     /// Creates a new `DerivedKey` from raw key bytes.

@@ -416,6 +416,7 @@ pub fn scanner_get_security_score(
         51..=70 => "Fair".to_string(),
         71..=85 => "Good".to_string(),
         86..=100 => "Excellent".to_string(),
+        _ => "Excellent".to_string(),
     };
 
     // Record activity
