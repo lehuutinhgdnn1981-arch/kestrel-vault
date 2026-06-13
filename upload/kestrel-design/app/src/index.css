@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@import "./variables.css";
 
 @tailwind base;
 @tailwind components;
@@ -45,71 +44,18 @@
     --kestrel-border: #E2E8F0;
     --kestrel-border-subtle: #F1F5F9;
   }
+}
 
+@layer base {
   * {
-    border-color: hsl(var(--color-border));
+    @apply border-border;
   }
-
   body {
     font-family: 'Inter', system-ui, sans-serif;
     background-color: var(--kestrel-bg);
     color: var(--kestrel-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-
-  h1, h2, h3, h4, h5, h6 {
-    font-weight: 600;
-    letter-spacing: -0.025em;
-    color: hsl(var(--color-foreground));
-  }
-
-  /* Focus-visible styles for accessibility */
-  :focus-visible {
-    outline: 2px solid hsl(var(--color-ring));
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
-  }
-
-  :focus:not(:focus-visible) {
-    outline: none;
-  }
-
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: #CBD5E1;
-    border-radius: 3px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: #94A3B8;
-  }
-
-  /* Firefox scrollbar */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--color-muted-foreground) / 0.3) transparent;
-  }
-
-  /* Selection */
-  ::selection {
-    background-color: rgba(37, 99, 235, 0.2);
-    color: var(--kestrel-text);
-  }
-}
-
-@layer components {
-  .text-balance {
-    text-wrap: balance;
   }
 }
 
@@ -119,7 +65,6 @@
   }
 }
 
-/* Animations */
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   10%, 50%, 90% { transform: translateX(-4px); }
@@ -146,11 +91,6 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 .animate-shake {
   animation: shake 300ms ease-in-out;
 }
@@ -165,4 +105,29 @@
 
 .animate-count-up {
   animation: countUp 600ms ease-out forwards;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Selection */
+::selection {
+  background-color: rgba(37, 99, 235, 0.2);
+  color: var(--kestrel-text);
 }

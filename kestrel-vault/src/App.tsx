@@ -3,71 +3,42 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/auth-store";
 import { useAutoLock } from "@/hooks/use-auto-lock";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcut";
-import { ToastContainer } from "@/components/ui/toast";
-import { AppLayout } from "@/components/layout/AppLayout";
-import { UnlockScreen } from "@/app/UnlockScreen";
-import { VaultView } from "@/app/VaultView";
-import { NotesView } from "@/app/NotesView";
-import { FilesView } from "@/app/FilesView";
-import { ScannerView } from "@/app/ScannerView";
-import { AuditView } from "@/app/AuditView";
-import { SecurityCenterView } from "@/app/SecurityCenterView";
-import { SettingsView } from "@/app/SettingsView";
-import { ROUTES } from "@/lib/constants";
-
-// ─── Protected Route ───────────────────────────────────────────────
-
-interface ProtectedRouteProps {
-  children: React.ReactNode;
-}
-
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const appState = useAuthStore((s) => s.appState);
-
-  if (appState === "locked") {
-    return <Navigate to={ROUTES.VAULT} replace />;
-  }
-
-  if (appState === "initializing") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-          <p className="mt-3 text-sm text-muted-foreground">Loading vault…</p>
-        </div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
-};
-
-// ─── App Component ─────────────────────────────────────────────────
+import Layout from "@/pages/Layout";
+import UnlockScreen from "@/pages/UnlockScreen";
+import Dashboard from "@/pages/Dashboard";
+import PasswordVault from "@/pages/PasswordVault";
+import FileVault from "@/pages/FileVault";
+import SecureNotes from "@/pages/SecureNotes";
+import SecurityCenter from "@/pages/SecurityCenter";
+import ThreatScanner from "@/pages/ThreatScanner";
+import AuditLogs from "@/pages/AuditLogs";
+import Settings from "@/pages/Settings";
 
 export const App: React.FC = () => {
   const appState = useAuthStore((s) => s.appState);
   const initialize = useAuthStore((s) => s.initialize);
 
-  // Initialize auth state on mount
   useEffect(() => {
     initialize();
   }, [initialize]);
 
-  // Enable auto-lock and keyboard shortcuts
   useAutoLock();
   useKeyboardShortcuts();
 
-  // Show unlock screen when vault is locked
-  if (appState === "locked") {
-    return (
-      <>
-        <UnlockScreen />
-        <ToastContainer />
-      </>
-    );
+  if (appState === "locked" || appState === "initializing") {
+    if (appState === "initializing") {
+      return (
+        <div className="flex h-screen items-center justify-center bg-background">
+          <div className="text-center">
+            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            <p className="mt-3 text-sm text-muted-foreground">Loading vault…</p>
+          </div>
+        </div>
+      );
+    }
+    return <UnlockScreen />;
   }
 
-  // Show error state
   if (appState === "error") {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -81,26 +52,19 @@ export const App: React.FC = () => {
   }
 
   return (
-    <>
+    <Layout>
       <Routes>
-        <Route
-          element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path={ROUTES.VAULT} element={<VaultView />} />
-          <Route path={ROUTES.NOTES} element={<NotesView />} />
-          <Route path={ROUTES.FILES} element={<FilesView />} />
-          <Route path={ROUTES.SCANNER} element={<ScannerView />} />
-          <Route path={ROUTES.AUDIT} element={<AuditView />} />
-          <Route path={ROUTES.SECURITY_CENTER} element={<SecurityCenterView />} />
-          <Route path={ROUTES.SETTINGS} element={<SettingsView />} />
-        </Route>
-        <Route path="*" element={<Navigate to={ROUTES.VAULT} replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/vault" element={<PasswordVault />} />
+        <Route path="/files" element={<FileVault />} />
+        <Route path="/notes" element={<SecureNotes />} />
+        <Route path="/security" element={<SecurityCenter />} />
+        <Route path="/scanner" element={<ThreatScanner />} />
+        <Route path="/audit" element={<AuditLogs />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-      <ToastContainer />
-    </>
+    </Layout>
   );
 };
