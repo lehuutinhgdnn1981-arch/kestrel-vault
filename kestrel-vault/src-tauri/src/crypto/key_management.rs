@@ -50,7 +50,7 @@ use crate::crypto::subkeys::SubKeySet;
 use crate::crypto::vault_crypto::VaultCryptoService;
 use crate::error::KestrelError;
 use crate::error::KestrelResult;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
@@ -70,7 +70,7 @@ use zeroize::ZeroizeOnDrop;
 #[derive(ZeroizeOnDrop)]
 pub struct MasterKey {
     /// The derived key material, protected by secrecy.
-    key: Secret<DerivedKey>,
+    key: SecretBox<DerivedKey>,
 }
 
 impl Clone for MasterKey {
@@ -83,7 +83,7 @@ impl Clone for MasterKey {
     /// clones to reduce the attack surface for memory extraction.
     fn clone(&self) -> Self {
         MasterKey {
-            key: Secret::new(self.key.expose_secret().clone()),
+            key: SecretBox::new(Box::new(self.key.expose_secret().clone())),
         }
     }
 }
@@ -111,7 +111,7 @@ impl MasterKey {
     ) -> Result<Self, KestrelError> {
         let derived = kdf::derive_key(password, salt)?;
         Ok(MasterKey {
-            key: Secret::new(derived),
+            key: SecretBox::new(Box::new(derived)),
         })
     }
 
@@ -136,7 +136,7 @@ impl MasterKey {
     ) -> Result<Self, KestrelError> {
         let derived = kdf::derive_key_with_params(password, salt, params)?;
         Ok(MasterKey {
-            key: Secret::new(derived),
+            key: SecretBox::new(Box::new(derived)),
         })
     }
 
@@ -182,7 +182,7 @@ impl MasterKey {
         let (derived, salt) = kdf::derive_key_with_new_salt(password)?;
         Ok((
             MasterKey {
-                key: Secret::new(derived),
+                key: SecretBox::new(Box::new(derived)),
             },
             salt,
         ))

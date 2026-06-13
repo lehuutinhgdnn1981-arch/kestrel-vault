@@ -35,8 +35,7 @@
 //! - Write operations (open/close/rekey) acquire exclusive access
 //! - The `Option` represents the vault's open/closed state
 
-use crate::crypto::random::random_bytes;
-use crate::db::connection::{DbConnection, format_sqlcipher_key, zeroize_string};
+use crate::db::connection::DbConnection;
 use crate::db::migrations;
 use crate::db::vault_meta_repo::VaultMetaRepo;
 use crate::error::{KestrelError, KestrelResult};
@@ -44,7 +43,6 @@ use parking_lot::RwLock;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use zeroize::Zeroize;
 
 /// Configuration for database connection pool and behavior.
 #[derive(Debug, Clone)]
@@ -349,7 +347,7 @@ impl DatabaseManager {
         let pool = self.pool()?;
 
         sqlx::query(&format!("PRAGMA rekey = {new_key_hex}"))
-            .execute(pool)
+            .execute(&pool)
             .await
             .map_err(|e| {
                 KestrelError::Database(format!("Failed to rekey database: {e}"))

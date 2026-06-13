@@ -13,7 +13,7 @@
 use crate::error::KestrelError;
 use crate::crypto::kdf::Salt;
 use crate::crypto::cipher::Nonce;
-use rand::RngCore;
+use rand::{RngCore, rngs::OsRng};
 use uuid::Uuid;
 
 /// Fills a byte buffer with cryptographically secure random bytes.

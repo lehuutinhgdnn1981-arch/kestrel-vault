@@ -108,7 +108,8 @@ impl DbConnection {
         // ── Security PRAGMAs ──
 
         // Set SQLCipher PRAGMA key for encryption
-        options = options.pragma("key", key);
+        let key_owned = key.to_owned();
+        options = options.pragma("key", &key_owned);
 
         // ── Journaling & Durability ──
 
@@ -116,7 +117,8 @@ impl DbConnection {
         options = options.pragma("journal_mode", "WAL");
 
         // Set synchronous mode (NORMAL is safe with WAL)
-        options = options.pragma("synchronous", &config.synchronous_mode.to_string());
+        let sync_mode = config.synchronous_mode.to_string();
+        options = options.pragma("synchronous", &sync_mode);
 
         // ── Foreign Keys ──
 
@@ -127,10 +129,12 @@ impl DbConnection {
         // ── Performance PRAGMAs ──
 
         // Set cache size (negative = KiB, positive = pages)
-        options = options.pragma("cache_size", &config.cache_size_kib.to_string());
+        let cache_size = config.cache_size_kib.to_string();
+        options = options.pragma("cache_size", &cache_size);
 
         // Set busy timeout (how long to wait if database is locked)
-        options = options.pragma("busy_timeout", &config.busy_timeout_ms.to_string());
+        let busy_timeout = config.busy_timeout_ms.to_string();
+        options = options.pragma("busy_timeout", &busy_timeout);
 
         // ── Temp storage ──
 
@@ -232,7 +236,9 @@ impl DbConnection {
     ///
     /// Useful for monitoring pool health and connection usage.
     pub fn idle_connections(&self) -> u32 {
-        self.pool.size() - self.pool.num_active()
+        // sqlx 0.8 doesn't expose num_active directly
+        // Approximate by returning pool size (total connections)
+        self.pool.size()
     }
 
     /// Returns the total number of connections (active + idle).

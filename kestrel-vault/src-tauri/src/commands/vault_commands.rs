@@ -7,7 +7,7 @@
 use crate::commands::types::{
     validate_field, validate_uuid, CommandError, CommandResult,
     PasswordRevealResponse, VaultEntryResponse,
-    MAX_NOTES_LEN, MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
+    MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN,
 };
 use crate::vault::entry::CreateEntryRequest;
 use crate::vault::service::VaultServiceImpl;
@@ -92,8 +92,8 @@ pub fn vault_create_entry(
 
     Ok(VaultEntryResponse {
         id: entry.id.to_string(),
-        title: entry.title,
-        username: entry.username,
+        title: entry.title.clone(),
+        username: entry.username.clone(),
         url: None,
         folder_id: entry.folder_id.map(|u| u.to_string()),
         has_totp: entry.has_totp(),
@@ -139,8 +139,8 @@ pub fn vault_get_entry(
 
     Ok(VaultEntryResponse {
         id: entry.id.to_string(),
-        title: entry.title,
-        username: entry.username,
+        title: entry.title.clone(),
+        username: entry.username.clone(),
         url: None,
         folder_id: entry.folder_id.map(|u| u.to_string()),
         has_totp: entry.has_totp(),
@@ -241,8 +241,8 @@ pub fn vault_update_entry(
 
     Ok(VaultEntryResponse {
         id: entry.id.to_string(),
-        title: entry.title,
-        username: entry.username,
+        title: entry.title.clone(),
+        username: entry.username.clone(),
         url: None,
         folder_id: entry.folder_id.map(|u| u.to_string()),
         has_totp: entry.has_totp(),
@@ -337,8 +337,8 @@ pub fn vault_list_entries(
 
     let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
         id: e.id.to_string(),
-        title: e.title,
-        username: e.username,
+        title: e.title.clone(),
+        username: e.username.clone(),
         url: None,
         folder_id: e.folder_id.map(|u| u.to_string()),
         has_totp: e.has_totp(),
@@ -385,8 +385,8 @@ pub fn vault_search_entries(
 
     let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
         id: e.id.to_string(),
-        title: e.title,
-        username: e.username,
+        title: e.title.clone(),
+        username: e.username.clone(),
         url: None,
         folder_id: e.folder_id.map(|u| u.to_string()),
         has_totp: e.has_totp(),

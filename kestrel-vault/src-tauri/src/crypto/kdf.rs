@@ -22,7 +22,7 @@ use crate::error::KestrelError;
 use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::random::random_bytes;
 use argon2::{Algorithm, Argon2, Params, Version};
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use zeroize::Zeroize;
 
 /// Salt length in bytes. 16 bytes (128 bits) per Argon2 RFC 9106.
@@ -72,7 +72,7 @@ impl Salt {
 #[zeroize(drop)]
 pub struct DerivedKey {
     /// The raw key bytes, protected by secrecy and zeroize.
-    key: Secret<[u8; DERIVED_KEY_LEN]>,
+    key: SecretBox<[u8; DERIVED_KEY_LEN]>,
 }
 
 impl DerivedKey {
@@ -84,7 +84,7 @@ impl DerivedKey {
     /// are a legitimate derived key, not arbitrary data.
     pub fn new(bytes: [u8; DERIVED_KEY_LEN]) -> Self {
         DerivedKey {
-            key: Secret::new(bytes),
+            key: SecretBox::new(Box::new(bytes)),
         }
     }
 

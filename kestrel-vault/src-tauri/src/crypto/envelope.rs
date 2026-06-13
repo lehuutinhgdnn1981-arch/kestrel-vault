@@ -29,7 +29,6 @@
 use crate::crypto::cipher::{self, Ciphertext, Nonce};
 use crate::crypto::kdf::DerivedKey;
 use crate::error::{KestrelError, KestrelResult};
-use zeroize::Zeroize;
 
 /// Current envelope format version.
 pub const ENVELOPE_VERSION_1: u8 = 0x01;
@@ -78,7 +77,7 @@ impl EnvelopeVersion {
 /// Binds the entity ID and field name to the ciphertext, preventing
 /// swap attacks where ciphertext from one field or entry is moved
 /// to another.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AadContext {
     /// The entity identifier (e.g., entry UUID as string).
     entity_id: String,

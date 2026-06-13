@@ -25,7 +25,7 @@ use crate::commands::types::{
 use crate::crypto::secure_string::SecureString;
 use crate::scanner::breach_check;
 use crate::scanner::password_strength;
-use crate::scanner::vulnerability::{self, ScanInput, VulnerabilityType};
+use crate::scanner::vulnerability::{self, ScanInput};
 use crate::vault::service::VaultServiceImpl;
 use tauri::State;
 
@@ -137,13 +137,13 @@ pub fn scanner_check_breach(
 //!
 //! # IPC Contract
 //!
-//! - **Required state**: Unlocked
-//!
-//! # Security
-//!
-//! - All analysis happens in Rust memory
-//! - No passwords are stored during scan
-//! - Results contain only vulnerability metadata, not passwords
+// - **Required state**: Unlocked
+//
+// # Security
+//
+// - All analysis happens in Rust memory
+// - No passwords are stored during scan
+// - Results contain only vulnerability metadata, not passwords
 #[tauri::command]
 pub fn scanner_run_full_scan(
     state: State<'_, AppState>,

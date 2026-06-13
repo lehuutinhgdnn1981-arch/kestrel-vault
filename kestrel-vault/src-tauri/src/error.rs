@@ -11,7 +11,6 @@
 //! - Error messages never leak sensitive data (keys, passwords, plaintext)
 //! - Errors are categorized by domain for proper handling
 
-use std::fmt;
 
 /// The top-level error type for all KESTREL Vault operations.
 ///

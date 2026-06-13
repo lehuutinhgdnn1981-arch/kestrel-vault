@@ -14,7 +14,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 /// An audit event record from the database.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct AuditEventRow {
     pub id: String,
     pub category: String,

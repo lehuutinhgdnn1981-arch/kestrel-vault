@@ -385,7 +385,7 @@ impl VaultEntryRepo {
         pool: &SqlitePool,
         id: &str,
     ) -> KestrelResult<Vec<u8>> {
-        let result: Option<(Vec<u8>,)> = sqlx::query_as(
+        let row = sqlx::query_as::<_, (Vec<u8>,)>(
             "SELECT encrypted_password FROM vault_entries WHERE id = ?1"
         )
         .bind(id)
@@ -394,7 +394,7 @@ impl VaultEntryRepo {
         .map_err(|e| KestrelError::Database(format!("Failed to get password: {e}")))?
         .ok_or_else(|| KestrelError::Vault(format!("Entry not found: {id}")))?;
 
-        Ok(result.0)
+        Ok(row.0)
     }
 
     /// Updates the accessed_at timestamp for an entry.

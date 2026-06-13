@@ -13,10 +13,12 @@
 use crate::commands::types::{
     validate_field, AppSettingsResponse, CommandError, CommandResult,
 };
-use crate::config::AppConfig;
 use tauri::State;
 
 use super::auth_commands::AppState;
+
+#[cfg(test)]
+use crate::config::AppConfig;
 
 /// Returns the current application settings.
 ///
@@ -48,12 +50,12 @@ pub fn settings_get(
 //!
 //! # IPC Contract
 //!
-//! - **Required state**: Unlocked (settings changes require active session)
-//!
-//! # Errors
-//!
-//! - `UNAUTHORIZED`: Vault is locked
-//! - `VALIDATION_ERROR`: Invalid setting values
+// - **Required state**: Unlocked (settings changes require active session)
+//
+// # Errors
+//
+// - `UNAUTHORIZED`: Vault is locked
+// - `VALIDATION_ERROR`: Invalid setting values
 #[tauri::command]
 pub fn settings_update(
     auto_lock_minutes: Option<u32>,

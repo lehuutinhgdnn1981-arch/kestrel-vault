@@ -28,7 +28,7 @@
 use crate::commands::types::{
     validate_field, validate_uuid, CommandError, CommandResult,
     SecureNoteResponse, SecureNoteRevealResponse,
-    MAX_NOTES_LEN, MAX_TITLE_LEN,
+    MAX_TITLE_LEN,
 };
 use crate::vault::service::VaultServiceImpl;
 use tauri::State;

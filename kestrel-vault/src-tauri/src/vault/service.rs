@@ -43,20 +43,20 @@
 
 use crate::crypto::keywrap::DataEncryptionKey;
 use crate::crypto::secure_string::SecureString;
-use crate::crypto::vault_crypto::{VaultCryptoService, field_names, DecryptedField, EncryptedField};
+use crate::crypto::vault_crypto::{VaultCryptoService, field_names, DecryptedField};
 use crate::crypto::random::random_bytes;
 use crate::db::vault_entry_repo::{
     VaultEntryRepo, VaultEntryRow, CreateVaultEntryRequest, UpdateVaultEntryRequest,
 };
 use crate::db::vault_meta_repo::VaultMetaRepo;
 use crate::db::folder_repo::{FolderRepo, CreateFolderRequest};
-use crate::db::secure_note_repo::{SecureNoteRepo, CreateSecureNoteRequest};
-use crate::db::file_entry_repo::{FileEntryRepo, CreateFileEntryRequest};
+use crate::db::secure_note_repo::{SecureNoteRepo, CreateSecureNoteRequest, SecureNoteRow};
+use crate::db::file_entry_repo::FileEntryRepo;
 use crate::db::audit_event_repo::{AuditEventRepo, CreateAuditEventRequest};
 use crate::error::{KestrelError, KestrelResult};
 use crate::vault::entry::{CreateEntryRequest, UpdateEntryRequest, VaultEntry};
-use crate::vault::folder::{Folder, FolderNode};
-use crate::vault::search::{SearchQuery, SearchResult};
+use crate::vault::folder::Folder;
+use crate::vault::search::SearchQuery;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -228,7 +228,7 @@ impl<'a> VaultServiceImpl<'a> {
             None => None,
         };
 
-        let folder_id = request.folder_id.map(|opt| opt.map(|u| u.to_string()));
+        let folder_id = request.folder_id.map(|u| Some(u.to_string()));
 
         let repo_request = UpdateVaultEntryRequest {
             title: request.title,
@@ -383,7 +383,7 @@ impl<'a> VaultServiceImpl<'a> {
     pub async fn decrypt_folder_name(&self, folder_id: &str, encrypted_name: &[u8]) -> KestrelResult<String> {
         let crypto = self.crypto_service();
         let decrypted = crypto.decrypt_field(folder_id, "name", encrypted_name)?;
-        String::from_utf8(decrypted.plaintext)
+        String::from_utf8(decrypted.plaintext.clone())
             .map_err(|e| KestrelError::Crypto(format!("Folder name is not valid UTF-8: {e}")))
     }
 
@@ -631,7 +631,7 @@ impl<'a> VaultServiceImpl<'a> {
     pub async fn decrypt_note_title(&self, note_id: &str, encrypted_title: &[u8]) -> KestrelResult<String> {
         let crypto = self.crypto_service();
         let decrypted = crypto.decrypt_field(note_id, "title", encrypted_title)?;
-        String::from_utf8(decrypted.plaintext)
+        String::from_utf8(decrypted.plaintext.clone())
             .map_err(|e| KestrelError::Crypto(format!("Note title is not valid UTF-8: {e}")))
     }
 

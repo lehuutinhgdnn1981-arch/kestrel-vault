@@ -37,9 +37,9 @@
 use crate::crypto::kdf::DerivedKey;
 use crate::error::{KestrelError, KestrelResult};
 use hkdf::Hkdf;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use sha2::Sha256;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::ZeroizeOnDrop;
 
 /// Length of derived sub-keys in bytes (256 bits for AES-256).
 const SUBKEY_LEN: usize = 32;
@@ -78,17 +78,17 @@ const INFO_TOTP_ENCRYPTION: &[u8] = b"kestrel:totp-encryption";
 #[derive(ZeroizeOnDrop)]
 pub struct SubKey {
     /// The raw sub-key bytes, protected by secrecy and zeroize.
-    key: Secret<[u8; SUBKEY_LEN]>,
+    key: SecretBox<[u8; SUBKEY_LEN]>,
     /// The purpose/info string this sub-key was derived for.
-    purpose: &'static [u8],
+    purpose: Vec<u8>,
 }
 
 impl SubKey {
     /// Creates a new sub-key from raw bytes and purpose info.
-    fn new(bytes: [u8; SUBKEY_LEN], purpose: &'static [u8]) -> Self {
+    fn new(bytes: [u8; SUBKEY_LEN], purpose: &[u8]) -> Self {
         SubKey {
-            key: Secret::new(bytes),
-            purpose,
+            key: SecretBox::new(Box::new(bytes)),
+            purpose: purpose.to_vec(),
         }
     }
 
@@ -109,16 +109,16 @@ impl SubKey {
     }
 
     /// Returns the purpose info string this sub-key was derived for.
-    pub fn purpose(&self) -> &'static [u8] {
-        self.purpose
+    pub fn purpose(&self) -> &[u8] {
+        &self.purpose
     }
 }
 
 impl Clone for SubKey {
     fn clone(&self) -> Self {
         SubKey {
-            key: Secret::new(*self.key.expose_secret()),
-            purpose: self.purpose,
+            key: SecretBox::new(Box::new(*self.key.expose_secret())),
+            purpose: self.purpose.clone(),
         }
     }
 }
@@ -167,17 +167,8 @@ fn derive_subkey(dek: &DerivedKey, info: &[u8]) -> KestrelResult<SubKey> {
     hkdf.expand(info, &mut subkey_bytes)
         .map_err(|e| KestrelError::Crypto(format!("HKDF expansion failed: {e}")))?;
 
-    // Determine the static purpose string (for known purposes)
-    let purpose = match info {
-        x if x == INFO_FIELD_ENCRYPTION => INFO_FIELD_ENCRYPTION,
-        x if x == INFO_FILE_ENCRYPTION => INFO_FILE_ENCRYPTION,
-        x if x == INFO_SEARCH_INDEX => INFO_SEARCH_INDEX,
-        x if x == INFO_EXPORT_ENCRYPTION => INFO_EXPORT_ENCRYPTION,
-        x if x == INFO_TOTP_ENCRYPTION => INFO_TOTP_ENCRYPTION,
-        _ => info,
-    };
-
-    Ok(SubKey::new(subkey_bytes, purpose))
+    // Determine the purpose string
+    Ok(SubKey::new(subkey_bytes, info))
 }
 
 /// A collection of sub-keys derived from the DEK.

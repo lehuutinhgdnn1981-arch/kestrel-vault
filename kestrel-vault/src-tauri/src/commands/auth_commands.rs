@@ -37,8 +37,8 @@ use crate::crypto::key_management::{MasterKey, initialize_vault_keys, unlock_vau
 use crate::crypto::keywrap::{DataEncryptionKey, WrappedDek};
 use crate::crypto::kdf_params::KdfParams;
 use crate::crypto::secure_string::SecureString;
-use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
-use crate::db::manager::{DatabaseConfig, DatabaseManager, SharedDatabaseManager, VaultDbState};
+use crate::crypto::vault_crypto::unlock_vault_crypto;
+use crate::db::manager::{DatabaseManager, SharedDatabaseManager};
 use crate::error::KestrelError;
 use crate::security::lockout::{FailedAttemptTracker, LockoutState};
 use crate::security::rate_limit::{Operation, RateLimiter};
@@ -185,7 +185,7 @@ impl AppState {
         });
         match tracker.lockout_state() {
             LockoutState::Allowed => Ok(()),
-            LockoutState::Delayed(secs) => {
+            LockoutState::Delayed(_secs) => {
                 // Check if the delay has elapsed
                 match tracker.lockout_state_at(chrono::Utc::now()) {
                     LockoutState::Allowed => Ok(()),
@@ -1158,7 +1158,7 @@ pub fn auth_change_password(
             tracing::error!("Master key lock poisoned: {}", e);
             std::process::exit(1);
         });
-        *key_guard = Some(rotation_pair.new_key);
+        *key_guard = Some(rotation_pair.new_key.clone());
     }
 
     // ── Update DEK in AppState ──

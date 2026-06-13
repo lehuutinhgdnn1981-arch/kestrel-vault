@@ -1,0 +1,1014 @@
+140 | //! - **Required state**: Unlocked
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+140 - //! - **Required state**: Unlocked
+140 + // - **Required state**: Unlocked
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:141:1
+    |
+141 | //!
+    | ^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+141 - //!
+141 + //
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:142:1
+    |
+142 | //! # Security
+    | ^^^^^^^^^^^^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+142 - //! # Security
+142 + // # Security
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:143:1
+    |
+143 | //!
+    | ^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+143 - //!
+143 + //
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:144:1
+    |
+144 | //! - All analysis happens in Rust memory
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+144 - //! - All analysis happens in Rust memory
+144 + // - All analysis happens in Rust memory
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:145:1
+    |
+145 | //! - No passwords are stored during scan
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+    |
+145 - //! - No passwords are stored during scan
+145 + // - No passwords are stored during scan
+    |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\scanner_commands.rs:146:1
+    |
+146 |   //! - Results contain only vulnerability metadata, not passwords
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+147 |   #[tauri::command]
+148 | / pub fn scanner_run_full_scan(
+149 | |     state: State<'_, AppState>,
+150 | | ) -> CommandResult<Vec<VulnerabilityItemResponse>> {
+...   |
+261 | |     Ok(responses)
+262 | | }
+    | |_- the inner doc comment doesn't annotate this function
+    |
+help: to annotate the function, change the doc comment from inner to outer style
+    |
+146 - //! - Results contain only vulnerability metadata, not passwords
+146 + /// - Results contain only vulnerability metadata, not passwords
+    |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:48:1
+   |
+48 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+48 - //!
+48 + //
+   |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:49:1
+   |
+49 | //! # IPC Contract
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+49 - //! # IPC Contract
+49 + // # IPC Contract
+   |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:50:1
+   |
+50 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+50 - //!
+50 + //
+   |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:51:1
+   |
+51 | //! - **Required state**: Unlocked (settings changes require active session)
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+51 - //! - **Required state**: Unlocked (settings changes require active session)
+51 + // - **Required state**: Unlocked (settings changes require active session)
+   |
+
+error[E0753]: expected outer doc comment
+  --> src\commands\settings_commands.rs:52:1
+   |
+52 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+52 - //!
+52 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> src\commands\settings_commands.rs:53:1
+   |
+53 | //! # Errors
+   | ^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+53 - //! # Errors
+53 + // # Errors
+   |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:54:1
+   |
+54 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+54 - //!
+54 + //
+   |
+
+error[E0753]: expected outer doc comment                    
+  --> src\commands\settings_commands.rs:55:1
+   |
+55 | //! - `UNAUTHORIZED`: Vault is locked
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+55 - //! - `UNAUTHORIZED`: Vault is locked
+55 + // - `UNAUTHORIZED`: Vault is locked
+   |
+
+error[E0753]: expected outer doc comment                    
+   --> src\commands\settings_commands.rs:56:1
+    |
+ 56 |   //! - `VALIDATION_ERROR`: Invalid setting values
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 57 |   #[tauri::command]
+ 58 | / pub fn settings_update(
+ 59 | |     auto_lock_minutes: Option<u32>,
+ 60 | |     theme: Option<String>,
+ 61 | |     language: Option<String>,
+...   |
+144 | |     Ok(updated_response)
+145 | | }
+    | |_- the inner doc comment doesn't annotate this function
+    |
+help: to annotate the function, change the doc comment from inner to outer style
+    |
+ 56 - //! - `VALIDATION_ERROR`: Invalid setting values
+ 56 + /// - `VALIDATION_ERROR`: Invalid setting values
+    |
+
+error[E0432]: unresolved import `secrecy::Secret`           
+  --> src\crypto\kdf.rs:25:29
+   |
+25 | use secrecy::{ExposeSecret, Secret};
+   |                             ^^^^^^ no `Secret` in the root
+
+error[E0432]: unresolved import `secrecy::Secret`           
+  --> src\crypto\key_management.rs:53:29
+   |
+53 | use secrecy::{ExposeSecret, Secret};
+   |                             ^^^^^^ no `Secret` in the root
+
+error[E0432]: unresolved import `secrecy::Secret`           
+  --> src\crypto\keywrap.rs:58:29
+   |
+58 | use secrecy::{ExposeSecret, Secret};
+   |                             ^^^^^^ no `Secret` in the root
+
+error[E0432]: unresolved import `secrecy::Secret`           
+  --> src\crypto\subkeys.rs:40:29
+   |
+40 | use secrecy::{ExposeSecret, Secret};
+   |                             ^^^^^^ no `Secret` in the root
+
+error[E0425]: cannot find value `OsRng` in this scope       
+  --> src\crypto\random.rs:30:5
+   |
+30 |     OsRng.try_fill_bytes(buf)
+   |     ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `SecureNoteRow` in this scope
+   --> src\vault\service.rs:469:24
+    |
+469 |     ) -> KestrelResult<SecureNoteRow> {
+    |                        ^^^^^^^^^^^^^
+    |
+   ::: src\db\secure_note_repo.rs:90:1
+    |
+ 90 | pub struct SecureNoteRepo;
+    | -------------------------- similarly named struct `SecureNoteRepo` defined here
+    |
+help: a struct with a similar name exists
+    |
+469 -     ) -> KestrelResult<SecureNoteRow> {
+469 +     ) -> KestrelResult<SecureNoteRepo> {
+    |
+help: consider importing this struct through its public re-export
+    |
+ 44 + use crate::db::SecureNoteRow;
+    |
+
+error[E0425]: cannot find type `SecureNoteRow` in this scope
+   --> src\vault\service.rs:516:28
+    |
+516 |     ) -> KestrelResult<Vec<SecureNoteRow>> {
+    |                            ^^^^^^^^^^^^^
+    |
+   ::: src\db\secure_note_repo.rs:90:1
+    |
+ 90 | pub struct SecureNoteRepo;
+    | -------------------------- similarly named struct `SecureNoteRepo` defined here
+    |
+help: a struct with a similar name exists
+    |
+516 -     ) -> KestrelResult<Vec<SecureNoteRow>> {
+516 +     ) -> KestrelResult<Vec<SecureNoteRepo>> {
+    |
+help: consider importing this struct through its public re-export
+    |
+ 44 + use crate::db::SecureNoteRow;
+    |
+
+error[E0425]: cannot find type `SecureNoteRow` in this scope
+   --> src\vault\service.rs:529:61
+    |
+529 |     pub async fn get_note(&self, id: Uuid) -> KestrelResult<SecureNoteRow> {
+    |                                                             ^^^^^^^^^^^^^
+    |
+   ::: src\db\secure_note_repo.rs:90:1
+    |
+ 90 | pub struct SecureNoteRepo;
+    | -------------------------- similarly named struct `SecureNoteRepo` defined here
+    |
+help: a struct with a similar name exists
+    |
+529 -     pub async fn get_note(&self, id: Uuid) -> KestrelResult<SecureNoteRow> {
+529 +     pub async fn get_note(&self, id: Uuid) -> KestrelResult<SecureNoteRepo> {
+    |
+help: consider importing this struct through its public re-export
+    |
+ 44 + use crate::db::SecureNoteRow;
+    |
+
+error[E0425]: cannot find type `SecureNoteRow` in this scope
+   --> src\vault\service.rs:544:24
+    |
+544 |     ) -> KestrelResult<SecureNoteRow> {
+    |                        ^^^^^^^^^^^^^
+    |
+   ::: src\db\secure_note_repo.rs:90:1
+    |
+ 90 | pub struct SecureNoteRepo;
+    | -------------------------- similarly named struct `SecureNoteRepo` defined here
+    |
+help: a struct with a similar name exists
+    |
+544 -     ) -> KestrelResult<SecureNoteRow> {
+544 +     ) -> KestrelResult<SecureNoteRepo> {
+    |
+help: consider importing this struct through its public re-export
+    |
+ 44 + use crate::db::SecureNoteRow;
+    |
+
+warning: unused imports: `VaultCryptoService` and `initialize_vault_crypto`
+  --> src\commands\auth_commands.rs:40:35
+   |
+40 | use crate::crypto::vault_crypto::{initialize_vault_crypto, unlock_vault_crypto, VaultCryptoService};
+   |                                   ^^^^^^^^^^^^^^^^^^^^^^^                       ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `DatabaseConfig` and `VaultDbState`
+  --> src\commands\auth_commands.rs:41:26
+   |
+41 | use crate::db::manager::{DatabaseConfig, DatabaseManager, SharedDatabaseManager, VaultDbState};
+   |                          ^^^^^^^^^^^^^^                                          ^^^^^^^^^^^^
+
+warning: unused import: `MAX_NOTES_LEN`                     
+  --> src\commands\note_commands.rs:31:5
+   |
+31 |     MAX_NOTES_LEN, MAX_TITLE_LEN,
+   |     ^^^^^^^^^^^^^
+
+warning: unused import: `VulnerabilityType`                 
+  --> src\commands\scanner_commands.rs:28:54
+   |
+28 | use crate::scanner::vulnerability::{self, ScanInput, VulnerabilityType};
+   |                                                      ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::config::AppConfig`          
+  --> src\commands\settings_commands.rs:16:5
+   |
+16 | use crate::config::AppConfig;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zeroize::Zeroize`                  
+  --> src\crypto\envelope.rs:32:5
+   |
+32 | use zeroize::Zeroize;
+   |     ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Ciphertext`, `Nonce`, and `self`  
+  --> src\crypto\keywrap.rs:53:29
+   |
+53 | use crate::crypto::cipher::{self, Ciphertext, Nonce};
+   |                             ^^^^  ^^^^^^^^^^  ^^^^^
+
+warning: unused import: `EnvelopeVersion`
+  --> src\crypto\keywrap.rs:54:68
+   |
+54 | use crate::crypto::envelope::{self, AadContext, EncryptedEnvelope, EnvelopeVersion};
+   |                                                                    ^^^^^^^^^^^^^^^
+
+warning: unused import: `Zeroize`                           
+  --> src\crypto\keywrap.rs:59:15
+   |
+59 | use zeroize::{Zeroize, ZeroizeOnDrop};
+   |               ^^^^^^^
+
+warning: unused import: `Zeroize`                           
+  --> src\crypto\subkeys.rs:42:15
+   |
+42 | use zeroize::{Zeroize, ZeroizeOnDrop};
+   |               ^^^^^^^
+
+warning: unused import: `crate::crypto::random::random_bytes`
+  --> src\db\manager.rs:38:5
+   |
+38 | use crate::crypto::random::random_bytes;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `format_sqlcipher_key` and `zeroize_string`
+  --> src\db\manager.rs:39:43
+   |
+39 | use crate::db::connection::{DbConnection, format_sqlcipher_key, zeroize_string};
+   |                                           ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+
+warning: unused import: `zeroize::Zeroize`                  
+  --> src\db\manager.rs:47:5
+   |
+47 | use zeroize::Zeroize;
+   |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::fmt`                          
+  --> src\error.rs:14:5
+   |
+14 | use std::fmt;
+   |     ^^^^^^^^
+
+warning: unused import: `ScanResult`                        
+  --> src\scanner\vulnerability.rs:23:22
+   |
+23 | use crate::scanner::{ScanResult, ThreatLevel};
+   |                      ^^^^^^^^^^
+
+warning: unused import: `EncryptedField`                    
+  --> src\vault\service.rs:46:84
+   |
+46 | use crate::crypto::vault_crypto::{VaultCryptoService, field_names, DecryptedField, EncryptedField};
+   |                                                                                    ^^^^^^^^^^^^^^
+
+warning: unused imports: `CreateFileEntryRequest` and `FileEntryRepo`
+  --> src\vault\service.rs:54:34
+   |
+54 | use crate::db::file_entry_repo::{FileEntryRepo, CreateFileEntryRequest};
+   |                                  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `FolderNode`                        
+  --> src\vault\service.rs:58:36
+   |
+58 | use crate::vault::folder::{Folder, FolderNode};
+   |                                    ^^^^^^^^^^
+
+warning: unused imports: `SearchQuery` and `SearchResult`   
+  --> src\vault\service.rs:59:28
+   |
+59 | use crate::vault::search::{SearchQuery, SearchResult};
+   |                            ^^^^^^^^^^^  ^^^^^^^^^^^^
+
+error[E0277]: the trait bound `for<'r> AuditEventRow: FromRow<'r, _>` is not satisfied
+   --> src\db\audit_event_repo.rs:81:40
+    |
+ 81 |         let rows = sqlx::query_as::<_, AuditEventRow>(
+    |                                        ^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `for<'r> FromRow<'r, _>` is not implemented for `AuditEventRow`
+   --> src\db\audit_event_repo.rs:18:1
+    |
+ 18 | pub struct AuditEventRow {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `sqlx::query_as`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:345:8
+    |
+342 | pub fn query_as<'q, DB, O>(sql: &'q str) -> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>>
+    |        -------- required by a bound in this function
+...
+345 |     O: for<'r> FromRow<'r, DB::Row>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `query_as`
+
+error[E0599]: the method `fetch_all` exists for struct `QueryAs<'_, _, AuditEventRow, _>`, but its trait bounds were not satisfied
+  --> src\db\audit_event_repo.rs:87:10
+   |
+18 |   pub struct AuditEventRow {
+   |   ------------------------ doesn't satisfy `AuditEventRow: FromRow<'r, _>`
+...
+81 |           let rows = sqlx::query_as::<_, AuditEventRow>(
+   |  ____________________-
+82 | |             "SELECT id, category, action, subject, metadata_json, timestamp \
+83 | |              FROM audit_events ORDER BY timestamp DESC LIMIT ?1 OFFSET ?2"
+...  |
+86 | |         .bind(offset)
+87 | |         .fetch_all(pool)
+   | |         -^^^^^^^^^ method cannot be called on `QueryAs<'_, _, AuditEventRow, _>` due to unsatisfied trait bounds
+   | |_________|
+   |
+   |
+   = note: the following trait bounds were not satisfied:
+           `AuditEventRow: FromRow<'r, _>`
+
+error[E0277]: the trait bound `for<'r> AuditEventRow: FromRow<'r, _>` is not satisfied
+   --> src\db\audit_event_repo.rs:101:40
+    |
+101 |         let rows = sqlx::query_as::<_, AuditEventRow>(
+    |                                        ^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `for<'r> FromRow<'r, _>` is not implemented for `AuditEventRow`
+   --> src\db\audit_event_repo.rs:18:1
+    |
+ 18 | pub struct AuditEventRow {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `sqlx::query_as`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:345:8
+    |
+342 | pub fn query_as<'q, DB, O>(sql: &'q str) -> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>>
+    |        -------- required by a bound in this function
+...
+345 |     O: for<'r> FromRow<'r, DB::Row>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `query_as`
+
+error[E0599]: the method `fetch_all` exists for struct `QueryAs<'_, _, AuditEventRow, _>`, but its trait bounds were not satisfied
+   --> src\db\audit_event_repo.rs:109:10
+    |
+ 18 |   pub struct AuditEventRow {
+    |   ------------------------ doesn't satisfy `AuditEventRow: FromRow<'r, _>`
+...
+101 |           let rows = sqlx::query_as::<_, AuditEventRow>(
+    |  ____________________-
+102 | |             "SELECT id, category, action, subject, metadata_json, timestamp \
+103 | |              FROM audit_events WHERE category = ?1 \
+104 | |              ORDER BY timestamp DESC LIMIT ?2 OFFSET ?3"
+...   |
+108 | |         .bind(offset)
+109 | |         .fetch_all(pool)
+    | |         -^^^^^^^^^ method cannot be called on `QueryAs<'_, _, AuditEventRow, _>` due to unsatisfied trait bounds
+    | |_________|
+    |
+    |
+    = note: the following trait bounds were not satisfied:
+            `AuditEventRow: FromRow<'r, _>`
+
+error[E0277]: the trait bound `for<'r> AuditEventRow: FromRow<'r, _>` is not satisfied
+   --> src\db\audit_event_repo.rs:124:40
+    |
+124 |         let rows = sqlx::query_as::<_, AuditEventRow>(
+    |                                        ^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `for<'r> FromRow<'r, _>` is not implemented for `AuditEventRow`
+   --> src\db\audit_event_repo.rs:18:1
+    |
+ 18 | pub struct AuditEventRow {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `sqlx::query_as`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:345:8
+    |
+342 | pub fn query_as<'q, DB, O>(sql: &'q str) -> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>>
+    |        -------- required by a bound in this function
+...
+345 |     O: for<'r> FromRow<'r, DB::Row>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `query_as`
+
+error[E0599]: the method `fetch_all` exists for struct `QueryAs<'_, _, AuditEventRow, _>`, but its trait bounds were not satisfied
+   --> src\db\audit_event_repo.rs:133:10
+    |
+ 18 |   pub struct AuditEventRow {
+    |   ------------------------ doesn't satisfy `AuditEventRow: FromRow<'r, _>`
+...
+124 |           let rows = sqlx::query_as::<_, AuditEventRow>(
+    |  ____________________-
+125 | |             "SELECT id, category, action, subject, metadata_json, timestamp \
+126 | |              FROM audit_events WHERE timestamp >= ?1 AND timestamp <= ?2 \
+127 | |              ORDER BY timestamp DESC LIMIT ?3 OFFSET ?4"
+...   |
+132 | |         .bind(offset)
+133 | |         .fetch_all(pool)
+    | |         -^^^^^^^^^ method cannot be called on `QueryAs<'_, _, AuditEventRow, _>` due to unsatisfied trait bounds
+    | |_________|
+    |
+    |
+    = note: the following trait bounds were not satisfied:
+            `AuditEventRow: FromRow<'r, _>`
+
+error[E0716]: temporary value dropped while borrowed        
+   --> src\db\connection.rs:119:50
+    |
+119 |         options = options.pragma("synchronous", &config.synchronous_mode.to_string());
+    |                   -------------------------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- temporary value is freed at the end of this statement
+    |                   |                              |
+    |                   |                              creates a temporary value which is freed while still in use
+    |                   argument requires that borrow lasts for `'static`
+    |
+note: requirement that the value outlives `'static` introduced here
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-sqlite-0.8.6\src\options\mod.rs:358:12
+    |
+358 |         V: Into<Cow<'static, str>>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0716]: temporary value dropped while borrowed
+   --> src\db\connection.rs:130:49
+    |
+130 |         options = options.pragma("cache_size", &config.cache_size_kib.to_string());
+    |                   ------------------------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- temporary value is freed at the end of this statement
+    |                   |                             |
+    |                   |                             creates a temporary value which is freed while still in use
+    |                   argument requires that borrow lasts for `'static`
+    |
+note: requirement that the value outlives `'static` introduced here
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-sqlite-0.8.6\src\options\mod.rs:358:12
+    |
+358 |         V: Into<Cow<'static, str>>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0716]: temporary value dropped while borrowed        
+   --> src\db\connection.rs:133:51
+    |
+133 |         options = options.pragma("busy_timeout", &config.busy_timeout_ms.to_string());
+    |                   --------------------------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- temporary value is freed at the end of this statement
+    |                   |                               |
+    |                   |                               creates a temporary value which is freed while still in use
+    |                   argument requires that borrow lasts for `'static`
+    |
+note: requirement that the value outlives `'static` introduced here
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-sqlite-0.8.6\src\options\mod.rs:358:12
+    |
+358 |         V: Into<Cow<'static, str>>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0521]: borrowed data escapes outside of associated function
+   --> src\db\connection.rs:111:19
+    |
+100 |         key: &str,
+    |         ---  - let's call the lifetime of this reference `'1`
+    |         |
+    |         `key` is a reference that is only valid in the associated function body
+...
+111 |         options = options.pragma("key", key);
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                   |
+    |                   `key` escapes the associated function body here
+    |                   argument requires that `'1` must outlive `'static`
+
+error[E0277]: the trait bound `Pool<Sqlite>: Executor<'_>` is not satisfied
+   --> src\db\manager.rs:352:22
+    |
+352 |             .execute(pool)
+    |              ------- ^^^^ the trait `Executor<'_>` is not implemented for `Pool<Sqlite>`
+    |              |
+    |              required by a bound introduced by this call
+    |
+note: required by a bound in `Query::<'q, DB, A>::execute`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query.rs:188:12
+    |
+184 |     pub async fn execute<'e, 'c: 'e, E>(self, executor: E) -> Result<DB::QueryResult, Error>
+    |                  ------- required by a bound in this associated function
+...
+188 |         E: Executor<'c, Database = DB>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Query::<'q, DB, A>::execute`
+help: consider borrowing here
+    |
+352 |             .execute(&pool)
+    |                      +
+
+error[E0277]: the trait bound `Pool<Sqlite>: Executor<'_>` is not satisfied
+   --> src\db\manager.rs:351:9
+    |
+351 | /         sqlx::query(&format!("PRAGMA rekey = {new_key_hex}"))
+352 | |             .execute(pool)
+    | |__________________________^ the trait `Executor<'_>` is not implemented for `Pool<Sqlite>`
+    |
+help: the trait `Executor<'_>` is not implemented for `Pool<Sqlite>`
+      but it is implemented for `&Pool<_>`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\pool\executor.rs:12:1
+    |
+ 12 | / impl<'p, DB: Database> Executor<'p> for &'_ Pool<DB>
+ 13 | | where
+ 14 | |     for<'c> &'c mut DB::Connection: Executor<'c, Database = DB>,
+    | |________________________________________________________________^
+    = help: for that trait implementation, expected `&Pool<_>`, found `Pool<Sqlite>`
+note: required by a bound in `Query::<'q, DB, A>::execute`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query.rs:188:12
+    |
+184 |     pub async fn execute<'e, 'c: 'e, E>(self, executor: E) -> Result<DB::QueryResult, Error>
+    |                  ------- required by a bound in this associated function
+...
+188 |         E: Executor<'c, Database = DB>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Query::<'q, DB, A>::execute`
+
+error[E0277]: the trait bound `Pool<Sqlite>: Executor<'_>` is not satisfied
+   --> src\db\manager.rs:353:14
+    |
+353 |             .await
+    |              ^^^^^ the trait `Executor<'_>` is not implemented for `Pool<Sqlite>`
+    |
+help: the trait `Executor<'_>` is not implemented for `Pool<Sqlite>`
+      but it is implemented for `&Pool<_>`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\pool\executor.rs:12:1
+    |
+ 12 | / impl<'p, DB: Database> Executor<'p> for &'_ Pool<DB>
+ 13 | | where
+ 14 | |     for<'c> &'c mut DB::Connection: Executor<'c, Database = DB>,
+    | |________________________________________________________________^
+    = help: for that trait implementation, expected `&Pool<_>`, found `Pool<Sqlite>`
+note: required by a bound in `Query::<'q, DB, A>::execute`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query.rs:188:12
+    |
+184 |     pub async fn execute<'e, 'c: 'e, E>(self, executor: E) -> Result<DB::QueryResult, Error>
+    |                  ------- required by a bound in this associated function
+...
+188 |         E: Executor<'c, Database = DB>,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Query::<'q, DB, A>::execute`
+
+error[E0277]: the trait bound `for<'r> std::option::Option<(Vec<u8>,)>: FromRow<'r, SqliteRow>` is not satisfied
+   --> src\db\vault_entry_repo.rs:392:10
+    |
+392 |         .fetch_optional(pool)
+    |          ^^^^^^^^^^^^^^ the trait `for<'r> FromRow<'r, SqliteRow>` is not implemented for `std::option::Option<(Vec<u8>,)>`
+    |
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `QueryAs::<'q, DB, O, A>::fetch_optional`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:86:23
+    |
+ 86 |     O: Send + Unpin + for<'r> FromRow<'r, DB::Row>,
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `QueryAs::<'q, DB, O, A>::fetch_optional`
+...
+185 |     pub async fn fetch_optional<'e, 'c: 'e, E>(self, executor: E) -> Result<Option<O>, Error>
+    |                  -------------- required by a bound in this associated function
+
+error[E0277]: the trait bound `for<'r> std::option::Option<(Vec<u8>,)>: FromRow<'r, SqliteRow>` is not satisfied
+   --> src\db\vault_entry_repo.rs:388:42
+    |
+388 |           let result: Option<(Vec<u8>,)> = sqlx::query_as(
+    |  __________________________________________^
+389 | |             "SELECT encrypted_password FROM vault_entries WHERE id = ?1"
+390 | |         )
+391 | |         .bind(id)
+392 | |         .fetch_optional(pool)
+    | |_____________________________^ the trait `for<'r> FromRow<'r, SqliteRow>` is not implemented for `std::option::Option<(Vec<u8>,)>`
+    |
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `QueryAs<'q, DB, O, A>`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:86:23
+    |
+ 86 |     O: Send + Unpin + for<'r> FromRow<'r, DB::Row>,
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `QueryAs<'q, DB, O, A>`
+
+error[E0277]: the trait bound `for<'r> std::option::Option<(Vec<u8>,)>: FromRow<'r, SqliteRow>` is not satisfied
+   --> src\db\vault_entry_repo.rs:388:42
+    |
+388 |           let result: Option<(Vec<u8>,)> = sqlx::query_as(
+    |  __________________________________________^
+389 | |             "SELECT encrypted_password FROM vault_entries WHERE id = ?1"
+390 | |         )
+    | |_________^ the trait `for<'r> FromRow<'r, SqliteRow>` is not implemented for `std::option::Option<(Vec<u8>,)>`
+    |
+    = help: the following other types implement trait `FromRow<'r, R>`:
+              ()
+              (T1, T2)
+              (T1, T2, T3)
+              (T1, T2, T3, T4)
+              (T1, T2, T3, T4, T5)
+              (T1, T2, T3, T4, T5, T6)
+              (T1, T2, T3, T4, T5, T6, T7)
+              (T1, T2, T3, T4, T5, T6, T7, T8)
+            and 9 others
+note: required by a bound in `sqlx::query_as`
+   --> C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sqlx-core-0.8.6\src\query_as.rs:345:8
+    |
+342 | pub fn query_as<'q, DB, O>(sql: &'q str) -> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>>
+    |        -------- required by a bound in this function
+...
+345 |     O: for<'r> FromRow<'r, DB::Row>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `query_as`
+
+error[E0609]: no field `0` on type `std::option::Option<(Vec<u8>,)>`
+   --> src\db\vault_entry_repo.rs:397:19
+    |
+397 |         Ok(result.0)
+    |                   ^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+397 |         Ok(result.unwrap().0)
+    |                   +++++++++
+
+error[E0599]: `Uuid` is not an iterator                     
+   --> src\vault\service.rs:231:57
+    |
+231 |         let folder_id = request.folder_id.map(|opt| opt.map(|u| u.to_string()));
+    |                                                         ^^^ `Uuid` is not an iterator
+    |
+   ::: C:\Users\SongPhatComputer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\uuid-1.23.3\src\lib.rs:465:1
+    |
+465 | pub struct Uuid(Bytes);
+    | --------------- doesn't satisfy `Uuid: Iterator`
+    |
+    = note: the following trait bounds were not satisfied:
+            `Uuid: Iterator`
+            which is required by `&mut Uuid: Iterator`
+
+error[E0509]: cannot move out of type `DecryptedField`, which implements the `Drop` trait
+   --> src\vault\service.rs:386:27
+    |
+386 |         String::from_utf8(decrypted.plaintext)
+    |                           ^^^^^^^^^^^^^^^^^^^
+    |                           |
+    |                           cannot move out of here
+    |                           move occurs because `decrypted.plaintext` has type `Vec<u8>`, which does not implement the `Copy` trait
+    |
+help: consider cloning the value if the performance cost is acceptable
+    |
+386 |         String::from_utf8(decrypted.plaintext.clone())
+    |                                              ++++++++
+
+error[E0509]: cannot move out of type `DecryptedField`, which implements the `Drop` trait
+   --> src\vault\service.rs:634:27
+    |
+634 |         String::from_utf8(decrypted.plaintext)
+    |                           ^^^^^^^^^^^^^^^^^^^
+    |                           |
+    |                           cannot move out of here
+    |                           move occurs because `decrypted.plaintext` has type `Vec<u8>`, which does not implement the `Copy` trait
+    |
+help: consider cloning the value if the performance cost is acceptable
+    |
+634 |         String::from_utf8(decrypted.plaintext.clone())
+    |                                              ++++++++
+
+error[E0369]: binary operation `==` cannot be applied to type `AadContext`
+   --> src\crypto\envelope.rs:130:5
+    |
+121 | #[derive(Debug, Clone, PartialEq, Eq)]
+    |                        --------- in this derive macro expansion
+...
+130 |     aad_context: AadContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: an implementation of `PartialEq` might be missing for `AadContext`
+   --> src\crypto\envelope.rs:82:1
+    |
+ 82 | pub struct AadContext {
+    | ^^^^^^^^^^^^^^^^^^^^^ must implement `PartialEq`
+help: consider annotating `AadContext` with `#[derive(PartialEq)]`
+    |
+ 82 + #[derive(PartialEq)]
+ 83 | pub struct AadContext {
+    |
+
+error[E0277]: the trait bound `AadContext: Eq` is not satisfied
+   --> src\crypto\envelope.rs:130:5
+    |
+121 | #[derive(Debug, Clone, PartialEq, Eq)]
+    |                                   -- in this derive macro expansion
+...
+130 |     aad_context: AadContext,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^ the trait `Eq` is not implemented for `AadContext`
+    |
+note: required by a bound in `std::cmp::AssertParamIsEq`
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\cmp.rs:379:0
+help: consider annotating `AadContext` with `#[derive(Eq)]`
+    |
+ 82 + #[derive(Eq)]
+ 83 | pub struct AadContext {
+    |
+
+error[E0599]: no method named `num_active` found for struct `Pool<DB>` in the current scope
+   --> src\db\connection.rs:235:38
+    |
+235 |         self.pool.size() - self.pool.num_active()
+    |                                      ^^^^^^^^^^ method not found in `Pool<Sqlite>`
+
+warning: unused variable: `secs`                            
+   --> src\commands\auth_commands.rs:188:35
+    |
+188 |             LockoutState::Delayed(secs) => {
+    |                                   ^^^^ help: if this is intentional, prefix it with an underscore: `_secs`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+error[E0509]: cannot move out of type `RotationKeyPair`, which implements the `Drop` trait
+    --> src\commands\auth_commands.rs:1161:27
+     |
+1161 |         *key_guard = Some(rotation_pair.new_key);
+     |                           ^^^^^^^^^^^^^^^^^^^^^
+     |                           |
+     |                           cannot move out of here
+     |                           move occurs because `rotation_pair.new_key` has type `MasterKey`, which does not implement the `Copy` trait     |
+help: consider cloning the value if the performance cost is acceptable
+     |
+1161 |         *key_guard = Some(rotation_pair.new_key.clone());
+     |                                                ++++++++
+
+error[E0382]: borrow of partially moved value: `entry`      
+  --> src\commands\vault_commands.rs:99:19
+   |
+96 |         username: entry.username,
+   |                   -------------- value partially moved here
+...
+99 |         has_totp: entry.has_totp(),
+   |                   ^^^^^ value borrowed here after partial move
+   |
+   = note: partial move occurs because `entry.username` has type `std::string::String`, which does not implement the `Copy` trait
+
+error[E0382]: borrow of partially moved value: `entry`      
+   --> src\commands\vault_commands.rs:146:19
+    |
+143 |         username: entry.username,
+    |                   -------------- value partially moved here
+...
+146 |         has_totp: entry.has_totp(),
+    |                   ^^^^^ value borrowed here after partial move
+    |
+    = note: partial move occurs because `entry.username` has type `std::string::String`, which does not implement the `Copy` trait
+
+error[E0382]: borrow of partially moved value: `entry`      
+   --> src\commands\vault_commands.rs:248:19
+    |
+245 |         username: entry.username,
+    |                   -------------- value partially moved here
+...
+248 |         has_totp: entry.has_totp(),
+    |                   ^^^^^ value borrowed here after partial move
+    |
+    = note: partial move occurs because `entry.username` has type `std::string::String`, which does not implement the `Copy` trait
+
+error[E0382]: borrow of partially moved value: `e`          
+   --> src\commands\vault_commands.rs:344:19
+    |
+341 |         username: e.username,
+    |                   ---------- value partially moved here
+...
+344 |         has_totp: e.has_totp(),
+    |                   ^ value borrowed here after partial move
+    |
+    = note: partial move occurs because `e.username` has type `std::string::String`, which does not implement the `Copy` trait
+
+error[E0382]: borrow of partially moved value: `e`          
+   --> src\commands\vault_commands.rs:392:19
+    |
+389 |         username: e.username,
+    |                   ---------- value partially moved here
+...
+392 |         has_totp: e.has_totp(),
+    |                   ^ value borrowed here after partial move
+    |
+    = note: partial move occurs because `e.username` has type `std::string::String`, which does not implement the `Copy` trait
+
+error[E0521]: borrowed data escapes outside of function     
+   --> src\crypto\subkeys.rs:180:8
+    |
+159 | fn derive_subkey(dek: &DerivedKey, info: &[u8]) -> KestrelResult<SubKey> {
+    |                                    ----  - let's call the lifetime of this reference `'1`
+    |                                    |
+    |                                    `info` is a reference that is only valid in the function body
+...
+180 |     Ok(SubKey::new(subkey_bytes, purpose))
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |        |
+    |        `info` escapes the function body here
+    |        argument requires that `'1` must outlive `'static`
+
+warning: unused variable: `param_idx`                       
+   --> src\db\folder_repo.rs:143:13
+    |
+143 |         let param_idx = 2; // Start after id
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_param_idx`
+
+warning: unused variable: `sql`
+   --> src\db\folder_repo.rs:157:17
+    |
+157 |             let sql = format!(
+    |                 ^^^ help: if this is intentional, prefix it with an underscore: `_sql`
+
+Some errors have detailed explanations: E0277, E0369, E0382, E0425, E0432, E0509, E0521, E0599, E0609...
+For more information about an error, try `rustc --explain E0277`.
+warning: `kestrel-vault` (lib) generated 22 warnings        
+error: could not compile `kestrel-vault` (lib) due to 92 previous errors; 22 warnings emitted

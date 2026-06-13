@@ -50,13 +50,12 @@
 //! - The unwrapped DEK is held in a `WrappedKey` struct that zeroizes on drop
 //! - The KEK is the Argon2id-derived master key (already zeroized on drop)
 
-use crate::crypto::cipher::{self, Ciphertext, Nonce};
-use crate::crypto::envelope::{self, AadContext, EncryptedEnvelope, EnvelopeVersion};
+use crate::crypto::envelope::{self, AadContext, EncryptedEnvelope};
 use crate::crypto::kdf::DerivedKey;
 use crate::crypto::random::random_bytes;
 use crate::error::{KestrelError, KestrelResult};
-use secrecy::{ExposeSecret, Secret};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use secrecy::{ExposeSecret, SecretBox};
+use zeroize::ZeroizeOnDrop;
 
 /// Length of the Data Encryption Key (DEK) in bytes.
 /// 32 bytes = 256 bits for AES-256.
@@ -84,7 +83,7 @@ const KEYWRAP_AAD_FIELD: &str = "wrapped_dek";
 #[derive(ZeroizeOnDrop)]
 pub struct DataEncryptionKey {
     /// The raw DEK bytes, protected by secrecy and zeroize.
-    key: Secret<[u8; DEK_LEN]>,
+    key: SecretBox<[u8; DEK_LEN]>,
 }
 
 impl DataEncryptionKey {
@@ -97,7 +96,7 @@ impl DataEncryptionKey {
         let mut key_bytes = [0u8; DEK_LEN];
         random_bytes(&mut key_bytes)?;
         Ok(DataEncryptionKey {
-            key: Secret::new(key_bytes),
+            key: SecretBox::new(Box::new(key_bytes)),
         })
     }
 
@@ -109,7 +108,7 @@ impl DataEncryptionKey {
     /// cryptographic key, not arbitrary data.
     pub fn from_bytes(bytes: [u8; DEK_LEN]) -> Self {
         DataEncryptionKey {
-            key: Secret::new(bytes),
+            key: SecretBox::new(Box::new(bytes)),
         }
     }
 
@@ -145,7 +144,7 @@ impl Clone for DataEncryptionKey {
     /// the attack surface for memory extraction.
     fn clone(&self) -> Self {
         DataEncryptionKey {
-            key: Secret::new(*self.key.expose_secret()),
+            key: SecretBox::new(Box::new(*self.key.expose_secret())),
         }
     }
 }
