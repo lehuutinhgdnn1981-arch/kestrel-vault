@@ -9,7 +9,8 @@ use crate::commands::types::{
     PasswordRevealResponse, VaultEntryResponse,
     MAX_TITLE_LEN, MAX_URL_LEN, MAX_USERNAME_LEN, MAX_NOTES_LEN,
 };
-use crate::vault::entry::CreateEntryRequest;
+use crate::crypto::vault_crypto::VaultCryptoService;
+use crate::vault::entry::{CreateEntryRequest, VaultEntry};
 use crate::vault::service::VaultServiceImpl;
 use tauri::State;
 
@@ -18,6 +19,55 @@ use super::auth_commands::AppState;
 /// Default auto-clear timeout for password reveals (in seconds).
 #[allow(dead_code)]
 const DEFAULT_AUTO_CLEAR_SECONDS: u32 = 30;
+
+/// Maximum length for the notes preview shown in entry lists.
+const NOTES_PREVIEW_MAX_LEN: usize = 100;
+
+/// Converts a VaultEntry to a VaultEntryResponse with decrypted url and notes_preview.
+fn entry_to_response(entry: &VaultEntry, dek: &crate::crypto::keywrap::DataEncryptionKey) -> VaultEntryResponse {
+    let crypto_service = VaultCryptoService::new_dek(dek);
+    let entry_id_str = entry.id.to_string();
+
+    // Decrypt URL
+    let url: Option<String> = if entry.encrypted_url.is_empty() {
+        None
+    } else {
+        match crypto_service.decrypt_field(&entry_id_str, "url", &entry.encrypted_url) {
+            Ok(decrypted) => Some(String::from_utf8_lossy(&decrypted.plaintext).to_string()),
+            Err(_) => None,
+        }
+    };
+
+    // Decrypt notes and create preview (truncated to NOTES_PREVIEW_MAX_LEN chars)
+    let notes_preview: Option<String> = if entry.encrypted_notes.is_empty() {
+        None
+    } else {
+        match crypto_service.decrypt_field(&entry_id_str, "notes", &entry.encrypted_notes) {
+            Ok(decrypted) => {
+                let text = String::from_utf8_lossy(&decrypted.plaintext).to_string();
+                let char_count = text.chars().count();
+                if char_count > NOTES_PREVIEW_MAX_LEN {
+                    Some(format!("{}...", text.chars().take(NOTES_PREVIEW_MAX_LEN).collect::<String>()))
+                } else {
+                    Some(text)
+                }
+            }
+            Err(_) => None,
+        }
+    };
+
+    VaultEntryResponse {
+        id: entry_id_str,
+        title: entry.title.clone(),
+        username: entry.username.clone(),
+        url,
+        folder_id: entry.folder_id.map(|u| u.to_string()),
+        has_totp: entry.has_totp(),
+        notes_preview,
+        created_at: entry.created_at.to_rfc3339(),
+        updated_at: entry.updated_at.to_rfc3339(),
+    }
+}
 
 /// Creates a new vault entry.
 #[tauri::command]
@@ -90,17 +140,7 @@ pub fn vault_create_entry(
 
     tracing::info!("Vault entry created: id={}", entry.id);
 
-    Ok(VaultEntryResponse {
-        id: entry.id.to_string(),
-        title: entry.title.clone(),
-        username: entry.username.clone(),
-        url: None,
-        folder_id: entry.folder_id.map(|u| u.to_string()),
-        has_totp: entry.has_totp(),
-        notes_preview: None,
-        created_at: entry.created_at.to_rfc3339(),
-        updated_at: entry.updated_at.to_rfc3339(),
-    })
+    Ok(entry_to_response(&entry, &dek))
 }
 
 /// Retrieves a vault entry by ID.
@@ -137,17 +177,7 @@ pub fn vault_get_entry(
         sm.record_activity();
     }
 
-    Ok(VaultEntryResponse {
-        id: entry.id.to_string(),
-        title: entry.title.clone(),
-        username: entry.username.clone(),
-        url: None,
-        folder_id: entry.folder_id.map(|u| u.to_string()),
-        has_totp: entry.has_totp(),
-        notes_preview: None,
-        created_at: entry.created_at.to_rfc3339(),
-        updated_at: entry.updated_at.to_rfc3339(),
-    })
+    Ok(entry_to_response(&entry, &dek))
 }
 
 /// Updates an existing vault entry.
@@ -239,17 +269,7 @@ pub fn vault_update_entry(
 
     tracing::info!("Vault entry updated: id={}", entry.id);
 
-    Ok(VaultEntryResponse {
-        id: entry.id.to_string(),
-        title: entry.title.clone(),
-        username: entry.username.clone(),
-        url: None,
-        folder_id: entry.folder_id.map(|u| u.to_string()),
-        has_totp: entry.has_totp(),
-        notes_preview: None,
-        created_at: entry.created_at.to_rfc3339(),
-        updated_at: entry.updated_at.to_rfc3339(),
-    })
+    Ok(entry_to_response(&entry, &dek))
 }
 
 /// Deletes a vault entry.
@@ -335,17 +355,7 @@ pub fn vault_list_entries(
         sm.record_activity();
     }
 
-    let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
-        id: e.id.to_string(),
-        title: e.title.clone(),
-        username: e.username.clone(),
-        url: None,
-        folder_id: e.folder_id.map(|u| u.to_string()),
-        has_totp: e.has_totp(),
-        notes_preview: None,
-        created_at: e.created_at.to_rfc3339(),
-        updated_at: e.updated_at.to_rfc3339(),
-    }).collect();
+    let responses: Vec<VaultEntryResponse> = entries.iter().map(|e| entry_to_response(e, &dek)).collect();
 
     Ok(responses)
 }
@@ -383,17 +393,7 @@ pub fn vault_search_entries(
         sm.record_activity();
     }
 
-    let responses: Vec<VaultEntryResponse> = entries.into_iter().map(|e| VaultEntryResponse {
-        id: e.id.to_string(),
-        title: e.title.clone(),
-        username: e.username.clone(),
-        url: None,
-        folder_id: e.folder_id.map(|u| u.to_string()),
-        has_totp: e.has_totp(),
-        notes_preview: None,
-        created_at: e.created_at.to_rfc3339(),
-        updated_at: e.updated_at.to_rfc3339(),
-    }).collect();
+    let responses: Vec<VaultEntryResponse> = entries.iter().map(|e| entry_to_response(e, &dek)).collect();
 
     Ok(responses)
 }

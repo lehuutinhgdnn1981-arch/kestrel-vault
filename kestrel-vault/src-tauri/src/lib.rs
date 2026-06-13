@@ -99,6 +99,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::scanner_commands::scanner_password_strength,
             commands::scanner_commands::scanner_check_breach,
             commands::scanner_commands::scanner_run_full_scan,
+            commands::scanner_commands::scanner_get_security_score,
             // Crypto commands (RESTRICTED)
             commands::crypto_commands::crypto_derive_key,
             commands::crypto_commands::crypto_encrypt_data,
@@ -110,6 +111,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::note_commands::note_update,
             commands::note_commands::note_delete,
             commands::note_commands::note_reveal,
+            // Folder commands
+            commands::folder_commands::folder_list,
+            commands::folder_commands::folder_create,
+            commands::folder_commands::folder_delete,
             // Settings commands
             commands::settings_commands::settings_get,
             commands::settings_commands::settings_update,
