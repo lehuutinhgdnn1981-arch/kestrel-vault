@@ -14,6 +14,11 @@ import {
   MoreHorizontal,
 } from 'lucide-react'
 
+// NOTE: File vault backend commands do not exist yet.
+// This page uses demo data until file-related Tauri commands are implemented.
+// When backend file commands are added, replace demoFiles with real data
+// fetched via the Tauri IPC layer.
+
 const fileFolders = [
   { id: 'all', label: 'All Files', icon: HardDrive, count: 8 },
   { id: 'documents', label: 'Documents', icon: FileText, count: 4 },
@@ -51,6 +56,7 @@ export default function FileVault() {
   const [activeFolder, setActiveFolder] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
+  const [showComingSoon, setShowComingSoon] = useState(false)
 
   const filteredFiles = demoFiles.filter((file) => {
     const matchesFolder = activeFolder === 'all' ||
@@ -85,11 +91,18 @@ export default function FileVault() {
             />
           </div>
           <button
+            onClick={() => setShowComingSoon(true)}
             className="w-full h-9 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors duration-150"
-            style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
+            style={{ backgroundColor: '#E2E8F0', color: '#94A3B8', cursor: 'not-allowed' }}
+            title="File upload coming soon — backend file commands not yet available"
           >
             <Plus size={16} /> Upload
           </button>
+          {showComingSoon && (
+            <div className="text-xs text-center py-1 px-2 rounded" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+              File upload coming soon
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-2">
@@ -214,7 +227,8 @@ export default function FileVault() {
               <div className="flex items-center gap-2">
                 <button
                   className="h-8 px-3 rounded-lg text-sm font-medium transition-colors"
-                  style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
+                  style={{ backgroundColor: '#E2E8F0', color: '#94A3B8', cursor: 'not-allowed' }}
+                  title="Coming soon — backend file commands not yet available"
                 >
                   Decrypt
                 </button>

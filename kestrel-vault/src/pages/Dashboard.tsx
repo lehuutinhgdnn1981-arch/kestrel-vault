@@ -12,12 +12,16 @@ import {
   Shield,
   Bell,
   Trash2,
+  Lock,
+  Settings,
+  Eye,
 } from 'lucide-react'
 import { LineChart, Line, ResponsiveContainer } from 'recharts'
 import { useAuthStore } from '@/stores/auth-store'
 import { useVaultStore } from '@/stores/vault-store'
 import { useNoteStore } from '@/stores/note-store'
 import { useNavigate } from 'react-router-dom'
+import { auditCommands, scannerCommands, type AuditEventView } from '@/lib/tauri'
 
 const sparkData1 = [
   { v: 65 }, { v: 72 }, { v: 68 }, { v: 75 }, { v: 80 }, { v: 77 }, { v: 85 }, { v: 87 },
@@ -29,13 +33,47 @@ const sparkData3 = [
   { v: 12 }, { v: 14 }, { v: 15 }, { v: 16 }, { v: 18 }, { v: 19 }, { v: 20 }, { v: 21 },
 ]
 
-const recentActivity = [
-  { icon: Plus, color: '#2563EB', text: 'Added password for Google', time: '2 min ago' },
-  { icon: Upload, color: '#22C55E', text: 'Uploaded file report.pdf', time: '10 min ago' },
-  { icon: ShieldCheck, color: '#22C55E', text: 'Security scan completed', time: '1 hour ago' },
-  { icon: FilePlus, color: '#8B5CF6', text: "Added note 'Server Credentials'", time: '2 hours ago' },
-  { icon: Trash2, color: '#EF4444', text: 'Deleted password for Old Account', time: '3 hours ago' },
-]
+// Map audit event categories/actions to icons and colors
+function getAuditEventStyle(category: string, action: string): { icon: typeof Plus; color: string } {
+  if (category === 'vault') {
+    if (action === 'create') return { icon: Plus, color: '#2563EB' }
+    if (action === 'delete') return { icon: Trash2, color: '#EF4444' }
+    if (action === 'password_reveal') return { icon: Eye, color: '#F59E0B' }
+    return { icon: Key, color: '#2563EB' }
+  }
+  if (category === 'notes') return { icon: FilePlus, color: '#8B5CF6' }
+  if (category === 'files') return { icon: Upload, color: '#22C55E' }
+  if (category === 'scanner') return { icon: ShieldCheck, color: '#22C55E' }
+  if (category === 'auth') {
+    if (action === 'unlock') return { icon: Lock, color: '#22C55E' }
+    if (action === 'lock') return { icon: Lock, color: '#64748B' }
+    return { icon: Shield, color: '#2563EB' }
+  }
+  if (category === 'settings') return { icon: Settings, color: '#64748B' }
+  return { icon: Shield, color: '#64748B' }
+}
+
+function formatTimeAgo(timestamp: string): string {
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  const diffMs = now - then
+  const diffSeconds = Math.floor(diffMs / 1000)
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (diffSeconds < 60) return 'just now'
+  if (diffMinutes < 60) return `${diffMinutes} min ago`
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`
+  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`
+}
+
+interface ActivityItem {
+  icon: typeof Plus
+  color: string
+  text: string
+  time: string
+}
 
 function AnimatedNumber({ value, duration = 600 }: { value: number; duration?: number }) {
   const [display, setDisplay] = useState(0)
@@ -109,19 +147,62 @@ export default function Dashboard() {
   const fetchNotes = useNoteStore((s) => s.fetchNotes)
   const appState = useAuthStore((s) => s.appState)
 
+  const [securityScore, setSecurityScore] = useState(0)
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([])
+
+  const passwordCount = entries.length
+  const noteCount = notes.length
+  const fileCount = 0 // No file vault backend integration yet
+  const storageUsed = 2.46
+  const storageTotal = 10
+
   useEffect(() => {
     if (appState === 'unlocked') {
       fetchEntries()
       fetchNotes()
+
+      // Fetch security score
+      const fetchScore = async () => {
+        try {
+          const results = await scannerCommands.runFullScan()
+          if (results.length === 0) {
+            setSecurityScore(100)
+          } else {
+            const criticalCount = results.filter((r) => r.threat_level === 'critical').length
+            const highCount = results.filter((r) => r.threat_level === 'high').length
+            const mediumCount = results.filter((r) => r.threat_level === 'medium').length
+            const lowCount = results.filter((r) => r.threat_level === 'low' || r.threat_level === 'none').length
+            const deduction = criticalCount * 25 + highCount * 15 + mediumCount * 8 + lowCount * 3
+            const score = Math.max(0, Math.min(100, 100 - deduction))
+            setSecurityScore(score)
+          }
+        } catch {
+          // Silently fail — score will remain 0
+        }
+      }
+      fetchScore()
+
+      // Fetch recent activity from audit log
+      const fetchActivity = async () => {
+        try {
+          const page = await auditCommands.queryEvents({ limit: 5 })
+          const activityItems: ActivityItem[] = page.events.map((event: AuditEventView) => {
+            const style = getAuditEventStyle(event.category, event.action)
+            return {
+              icon: style.icon,
+              color: style.color,
+              text: `${event.action} ${event.category}: ${event.subject}`,
+              time: formatTimeAgo(event.timestamp),
+            }
+          })
+          setRecentActivity(activityItems)
+        } catch {
+          // Silently fail — activity will remain empty
+        }
+      }
+      fetchActivity()
     }
   }, [appState, fetchEntries, fetchNotes])
-
-  const passwordCount = entries.length
-  const noteCount = notes.length
-  const fileCount = 0 // placeholder until file vault backend integration
-  const securityScore = 87 // placeholder until scanner integration
-  const storageUsed = 2.46
-  const storageTotal = 10
 
   return (
     <div className="animate-fade-in">
@@ -229,10 +310,14 @@ export default function Dashboard() {
             <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Security Score</h3>
             <div className="flex flex-col items-center">
               <SecurityScoreGauge score={securityScore} />
-              <p className="text-sm font-medium mt-2" style={{ color: '#22C55E' }}>Strong</p>
+              <p className="text-sm font-medium mt-2" style={{ color: securityScore >= 70 ? '#22C55E' : securityScore >= 40 ? '#F59E0B' : '#EF4444' }}>
+                {securityScore >= 90 ? 'Excellent' : securityScore >= 70 ? 'Strong' : securityScore >= 40 ? 'Fair' : 'Needs Attention'}
+              </p>
               <div className="flex items-center gap-1.5 mt-1">
-                <CheckCircle size={14} style={{ color: '#22C55E' }} />
-                <span className="text-xs" style={{ color: '#64748B' }}>Your vault is secure</span>
+                <CheckCircle size={14} style={{ color: securityScore >= 70 ? '#22C55E' : '#F59E0B' }} />
+                <span className="text-xs" style={{ color: '#64748B' }}>
+                  {securityScore >= 70 ? 'Your vault is secure' : 'Review security issues'}
+                </span>
               </div>
             </div>
           </div>
@@ -246,26 +331,32 @@ export default function Dashboard() {
               <button onClick={() => navigate('/audit')} className="text-xs font-medium" style={{ color: '#2563EB' }}>View all</button>
             </div>
             <div className="space-y-1">
-              {recentActivity.map((item, i) => {
-                const Icon = item.icon
-                return (
-                  <div
-                    key={i}
-                    className="flex items-center gap-3 px-2 py-2 rounded-lg transition-colors duration-150 cursor-pointer"
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
-                  >
+              {recentActivity.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm" style={{ color: '#94A3B8' }}>No recent activity</p>
+                </div>
+              ) : (
+                recentActivity.map((item, i) => {
+                  const Icon = item.icon
+                  return (
                     <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: `${item.color}15` }}
+                      key={i}
+                      className="flex items-center gap-3 px-2 py-2 rounded-lg transition-colors duration-150 cursor-pointer"
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
                     >
-                      <Icon size={13} style={{ color: item.color }} />
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: `${item.color}15` }}
+                      >
+                        <Icon size={13} style={{ color: item.color }} />
+                      </div>
+                      <span className="text-sm flex-1 truncate" style={{ color: '#0F172A' }}>{item.text}</span>
+                      <span className="text-xs flex-shrink-0" style={{ color: '#94A3B8' }}>{item.time}</span>
                     </div>
-                    <span className="text-sm flex-1 truncate" style={{ color: '#0F172A' }}>{item.text}</span>
-                    <span className="text-xs flex-shrink-0" style={{ color: '#94A3B8' }}>{item.time}</span>
-                  </div>
-                )
-              })}
+                  )
+                })
+              )}
             </div>
           </div>
         </div>
@@ -284,7 +375,7 @@ export default function Dashboard() {
                 <p className="text-sm" style={{ color: '#64748B' }}>Your vault is safe</p>
               </div>
             </div>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>Last scan: 2 hours ago</p>
+            <p className="text-xs" style={{ color: '#94A3B8' }}>Run a scan to check for threats</p>
           </div>
 
           <div

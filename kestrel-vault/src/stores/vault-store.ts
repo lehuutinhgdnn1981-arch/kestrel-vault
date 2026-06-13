@@ -115,7 +115,7 @@ export const useVaultStore = create<VaultState & VaultActions>((set, get) => ({
 
   deleteEntry: async (id: string) => {
     try {
-      await vaultCommands.deleteEntry(id);
+      await vaultCommands.deleteEntry(id, true);
       set((state) => ({
         entries: state.entries.filter((e) => e.id !== id),
         selectedEntryId: state.selectedEntryId === id ? null : state.selectedEntryId,

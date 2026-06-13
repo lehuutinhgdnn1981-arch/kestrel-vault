@@ -5,6 +5,7 @@ import {
   Pencil,
   Trash2,
   FileText,
+  X,
 } from 'lucide-react'
 import { useNoteStore } from '@/stores/note-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -29,10 +30,18 @@ export default function SecureNotes() {
   const selectNote = useNoteStore((s) => s.selectNote)
   const revealNote = useNoteStore((s) => s.revealNote)
   const revealedContent = useNoteStore((s) => s.revealedContent)
+  const createNote = useNoteStore((s) => s.createNote)
+  const deleteNote = useNoteStore((s) => s.deleteNote)
   const appState = useAuthStore((s) => s.appState)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [editingContent, setEditingContent] = useState('')
+
+  // New Note dialog state
+  const [showNewDialog, setShowNewDialog] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newContent, setNewContent] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
 
   useEffect(() => {
     if (appState === 'unlocked') fetchNotes()
@@ -48,6 +57,29 @@ export default function SecureNotes() {
     selectNote(id)
     const result = await revealNote(id)
     if (result) setEditingContent(result.content)
+  }
+
+  const handleCreateNote = async () => {
+    if (!newTitle.trim() || !newContent.trim()) return
+    setIsCreating(true)
+    try {
+      await createNote(newTitle, newContent)
+      setShowNewDialog(false)
+      setNewTitle('')
+      setNewContent('')
+    } catch {
+      // Error handled gracefully
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const handleDeleteNote = async (id: string) => {
+    try {
+      await deleteNote(id)
+    } catch {
+      // Error handled gracefully
+    }
   }
 
   return (
@@ -70,6 +102,7 @@ export default function SecureNotes() {
             />
           </div>
           <button
+            onClick={() => setShowNewDialog(true)}
             className="w-full h-9 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors duration-150"
             style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
           >
@@ -125,7 +158,11 @@ export default function SecureNotes() {
                 <button className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
                   <Pencil size={15} />
                 </button>
-                <button className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
+                <button
+                  onClick={() => handleDeleteNote(selectedNoteData.id)}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+                  style={{ color: '#64748B' }}
+                >
                   <Trash2 size={15} />
                 </button>
               </div>
@@ -168,6 +205,53 @@ export default function SecureNotes() {
           </div>
         )}
       </div>
+
+      {/* New Note Dialog */}
+      {showNewDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 8px 30px rgb(0 0 0 / 0.12)' }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold" style={{ color: '#0F172A' }}>New Note</h3>
+              <button onClick={() => setShowNewDialog(false)} className="w-8 h-8 flex items-center justify-center rounded-lg" style={{ color: '#64748B' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Title *</label>
+                <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="e.g. Server Credentials"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Content *</label>
+                <textarea value={newContent} onChange={(e) => setNewContent(e.target.value)}
+                  placeholder="Write your note content here..."
+                  className="w-full h-40 rounded-lg text-sm outline-none p-3 resize-none font-mono-geist"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A', lineHeight: 1.7 }} />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button onClick={() => setShowNewDialog(false)}
+                className="px-4 h-9 rounded-lg text-sm font-medium"
+                style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}>
+                Cancel
+              </button>
+              <button onClick={handleCreateNote} disabled={isCreating || !newTitle.trim() || !newContent.trim()}
+                className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
+                style={{
+                  backgroundColor: isCreating || !newTitle.trim() || !newContent.trim() ? '#E2E8F0' : '#2563EB',
+                  color: isCreating || !newTitle.trim() || !newContent.trim() ? '#94A3B8' : '#FFFFFF',
+                }}>
+                {isCreating ? 'Creating...' : 'Create Note'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

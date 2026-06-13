@@ -3,10 +3,7 @@ import {
   Search,
   Plus,
   List,
-  Users,
-  Briefcase,
-  CreditCard,
-  User,
+  FolderIcon,
   Inbox,
   Copy,
   Eye,
@@ -14,19 +11,11 @@ import {
   Pencil,
   Trash2,
   ChevronDown,
+  X,
 } from 'lucide-react'
 import { useVaultStore } from '@/stores/vault-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { vaultCommands } from '@/lib/tauri'
-
-const folders = [
-  { id: 'all', label: 'All Items', icon: List },
-  { id: 'social', label: 'Social', icon: Users },
-  { id: 'work', label: 'Work', icon: Briefcase },
-  { id: 'finance', label: 'Finance', icon: CreditCard },
-  { id: 'personal', label: 'Personal', icon: User },
-  { id: 'none', label: 'No Folder', icon: Inbox },
-]
+import { vaultCommands, folderCommands } from '@/lib/tauri'
 
 const avatarColors: Record<string, string> = {
   Google: '#4285F4', Facebook: '#1877F2', GitHub: '#333333', Discord: '#5865F2',
@@ -39,6 +28,8 @@ export default function PasswordVault() {
   const deleteEntry = useVaultStore((s) => s.deleteEntry)
   const selectedEntryId = useVaultStore((s) => s.selectedEntryId)
   const selectEntry = useVaultStore((s) => s.selectEntry)
+  const folders = useVaultStore((s) => s.folders)
+  const fetchFolders = useVaultStore((s) => s.fetchFolders)
   const appState = useAuthStore((s) => s.appState)
 
   const [activeFolder, setActiveFolder] = useState('all')
@@ -46,9 +37,36 @@ export default function PasswordVault() {
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
+  // Add Item dialog state
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newUsername, setNewUsername] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+  const [newNotes, setNewNotes] = useState('')
+  const [isAdding, setIsAdding] = useState(false)
+
+  // Edit mode state
+  const [editMode, setEditMode] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editUsername, setEditUsername] = useState('')
+  const [editPassword, setEditPassword] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
   useEffect(() => {
-    if (appState === 'unlocked') fetchEntries()
-  }, [appState, fetchEntries])
+    if (appState === 'unlocked') {
+      fetchEntries()
+      fetchFolders()
+    }
+  }, [appState, fetchEntries, fetchFolders])
+
+  // Reset edit mode when selected entry changes
+  useEffect(() => {
+    setEditMode(false)
+    setRevealedPassword(null)
+  }, [selectedEntryId])
 
   const filteredItems = entries.filter((item) => {
     const matchesSearch = !searchQuery ||
@@ -56,14 +74,9 @@ export default function PasswordVault() {
       item.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.url ?? '').toLowerCase().includes(searchQuery.toLowerCase())
 
-    // Filter by folder (based on URL domain heuristic)
-    const domain = (item.url ?? '').toLowerCase()
     const matchesFolder = activeFolder === 'all' ||
-      (activeFolder === 'social' && (domain.includes('facebook') || domain.includes('twitter') || domain.includes('discord') || domain.includes('instagram'))) ||
-      (activeFolder === 'work' && (domain.includes('github') || domain.includes('aws') || domain.includes('slack') || domain.includes('jira'))) ||
-      (activeFolder === 'finance' && (domain.includes('bank') || domain.includes('paypal') || domain.includes('stripe'))) ||
-      (activeFolder === 'personal' && (domain.includes('netflix') || domain.includes('spotify') || domain.includes('gmail') || domain.includes('google'))) ||
-      (activeFolder === 'none' && !item.url)
+      (activeFolder === 'none' && !item.folder_id) ||
+      (activeFolder !== 'none' && item.folder_id === activeFolder)
 
     return matchesFolder && matchesSearch
   })
@@ -91,6 +104,80 @@ export default function PasswordVault() {
     setRevealedPassword(null)
   }
 
+  const handleAddEntry = async () => {
+    if (!newTitle.trim() || !newUsername.trim() || !newPassword.trim()) return
+    setIsAdding(true)
+    try {
+      await vaultCommands.createEntry(
+        newTitle,
+        newUsername,
+        newPassword,
+        newUrl || undefined,
+        newNotes || undefined,
+      )
+      setShowAddDialog(false)
+      setNewTitle('')
+      setNewUsername('')
+      setNewPassword('')
+      setNewUrl('')
+      setNewNotes('')
+      await fetchEntries()
+    } catch {
+      // Error handled gracefully
+    } finally {
+      setIsAdding(false)
+    }
+  }
+
+  const handleStartEdit = () => {
+    if (!selectedItem) return
+    setEditTitle(selectedItem.title)
+    setEditUsername(selectedItem.username)
+    setEditPassword('')
+    setEditUrl(selectedItem.url ?? '')
+    setEditNotes(selectedItem.notes_preview ?? '')
+    setEditMode(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!selectedItem) return
+    setIsSaving(true)
+    try {
+      const updates: {
+        title?: string;
+        username?: string;
+        password?: string;
+        url?: string;
+        notes?: string;
+      } = {}
+      if (editTitle !== selectedItem.title) updates.title = editTitle
+      if (editUsername !== selectedItem.username) updates.username = editUsername
+      if (editPassword) updates.password = editPassword
+      if (editUrl !== (selectedItem.url ?? '')) updates.url = editUrl
+      if (editNotes !== (selectedItem.notes_preview ?? '')) updates.notes = editNotes
+
+      await vaultCommands.updateEntry(selectedItem.id, updates)
+      setEditMode(false)
+      setRevealedPassword(null)
+      await fetchEntries()
+    } catch {
+      // Error handled gracefully
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCreateFolder = async () => {
+    const name = prompt('Enter folder name:')
+    if (!name?.trim()) return
+    try {
+      await folderCommands.createFolder(name.trim())
+      await fetchFolders()
+    } catch {
+      // Error handled gracefully
+    }
+  }
+
   return (
     <div className="flex h-full animate-fade-in">
       {/* Folder sidebar */}
@@ -109,16 +196,46 @@ export default function PasswordVault() {
               style={{ backgroundColor: '#F8FAFC', paddingLeft: '32px', paddingRight: '10px', border: '1px solid #E2E8F0', color: '#0F172A' }}
             />
           </div>
-          <button className="w-full h-9 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors duration-150"
+          <button
+            onClick={() => setShowAddDialog(true)}
+            className="w-full h-9 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors duration-150"
             style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}>
             <Plus size={16} /> Add Item
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-2">
+          {/* All Items */}
+          <button
+            onClick={() => setActiveFolder('all')}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 mb-0.5"
+            style={{
+              backgroundColor: activeFolder === 'all' ? '#F8FAFC' : 'transparent',
+              borderLeft: activeFolder === 'all' ? '3px solid #2563EB' : '3px solid transparent',
+              color: activeFolder === 'all' ? '#0F172A' : '#64748B',
+            }}
+          >
+            <List size={16} />
+            <span className="text-sm flex-1">All Items</span>
+          </button>
+
+          {/* No Folder */}
+          <button
+            onClick={() => setActiveFolder('none')}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 mb-0.5"
+            style={{
+              backgroundColor: activeFolder === 'none' ? '#F8FAFC' : 'transparent',
+              borderLeft: activeFolder === 'none' ? '3px solid #2563EB' : '3px solid transparent',
+              color: activeFolder === 'none' ? '#0F172A' : '#64748B',
+            }}
+          >
+            <Inbox size={16} />
+            <span className="text-sm flex-1">No Folder</span>
+          </button>
+
+          {/* Real folders from backend */}
           {folders.map((folder) => {
             const isActive = activeFolder === folder.id
-            const Icon = folder.icon
             return (
               <button
                 key={folder.id}
@@ -130,13 +247,13 @@ export default function PasswordVault() {
                   color: isActive ? '#0F172A' : '#64748B',
                 }}
               >
-                <Icon size={16} />
-                <span className="text-sm flex-1">{folder.label}</span>
+                <FolderIcon size={16} />
+                <span className="text-sm flex-1">{folder.name}</span>
               </button>
             )
           })}
           <div className="px-3 py-2">
-            <button className="text-sm font-medium" style={{ color: '#2563EB' }}>+ New Folder</button>
+            <button onClick={handleCreateFolder} className="text-sm font-medium" style={{ color: '#2563EB' }}>+ New Folder</button>
           </div>
         </div>
 
@@ -154,7 +271,7 @@ export default function PasswordVault() {
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #E2E8F0' }}>
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold" style={{ color: '#0F172A' }}>
-              {folders.find((f) => f.id === activeFolder)?.label || 'All Items'}
+              {activeFolder === 'all' ? 'All Items' : activeFolder === 'none' ? 'No Folder' : folders.find((f) => f.id === activeFolder)?.name || 'All Items'}
             </h3>
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>
               {filteredItems.length}
@@ -213,6 +330,59 @@ export default function PasswordVault() {
             <img src="/kestrel-logo.png" alt="" className="w-12 h-12 object-contain mb-3 opacity-30" />
             <p className="text-sm" style={{ color: '#94A3B8' }}>Select an item to view details</p>
           </div>
+        ) : editMode ? (
+          <div className="flex flex-col h-full overflow-y-auto">
+            <div className="p-5" style={{ borderBottom: '1px solid #E2E8F0' }}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold" style={{ color: '#0F172A' }}>Edit Entry</h3>
+                <div className="flex items-center gap-1">
+                  <button onClick={handleSaveEdit} disabled={isSaving}
+                    className="px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+                    style={{ backgroundColor: '#2563EB', color: '#FFFFFF', opacity: isSaving ? 0.6 : 1 }}>
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button onClick={() => setEditMode(false)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Title</label>
+                <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Username</label>
+                <input type="text" value={editUsername} onChange={(e) => setEditUsername(e.target.value)}
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Password</label>
+                <input type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Leave blank to keep current"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Website</label>
+                <input type="text" value={editUrl} onChange={(e) => setEditUrl(e.target.value)}
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Notes</label>
+                <textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
+                  className="w-full h-20 rounded-lg text-sm outline-none p-3 resize-none"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col h-full overflow-y-auto">
             <div className="p-5" style={{ borderBottom: '1px solid #E2E8F0' }}>
@@ -230,7 +400,7 @@ export default function PasswordVault() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
+                  <button onClick={handleStartEdit} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
                     <Pencil size={15} />
                   </button>
                   <button onClick={() => handleDelete(selectedItem.id)} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
@@ -298,6 +468,74 @@ export default function PasswordVault() {
           </div>
         )}
       </div>
+
+      {/* Add Item Dialog */}
+      {showAddDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 8px 30px rgb(0 0 0 / 0.12)' }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold" style={{ color: '#0F172A' }}>Add New Item</h3>
+              <button onClick={() => setShowAddDialog(false)} className="w-8 h-8 flex items-center justify-center rounded-lg" style={{ color: '#64748B' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Title *</label>
+                <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="e.g. Google"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Username *</label>
+                <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)}
+                  placeholder="e.g. user@example.com"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Password *</label>
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Website</label>
+                <input type="text" value={newUrl} onChange={(e) => setNewUrl(e.target.value)}
+                  placeholder="e.g. google.com"
+                  className="w-full h-9 rounded-lg text-sm outline-none px-3"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#64748B' }}>Notes</label>
+                <textarea value={newNotes} onChange={(e) => setNewNotes(e.target.value)}
+                  placeholder="Optional notes"
+                  className="w-full h-20 rounded-lg text-sm outline-none p-3 resize-none"
+                  style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button onClick={() => setShowAddDialog(false)}
+                className="px-4 h-9 rounded-lg text-sm font-medium"
+                style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}>
+                Cancel
+              </button>
+              <button onClick={handleAddEntry} disabled={isAdding || !newTitle.trim() || !newUsername.trim() || !newPassword.trim()}
+                className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
+                style={{
+                  backgroundColor: isAdding || !newTitle.trim() || !newUsername.trim() || !newPassword.trim() ? '#E2E8F0' : '#2563EB',
+                  color: isAdding || !newTitle.trim() || !newUsername.trim() || !newPassword.trim() ? '#94A3B8' : '#FFFFFF',
+                }}>
+                {isAdding ? 'Adding...' : 'Add Item'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
