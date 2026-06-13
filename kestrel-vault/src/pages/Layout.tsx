@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { useVaultStore } from '@/stores/vault-store'
+import { useNoteStore } from '@/stores/note-store'
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -31,6 +32,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const appState = useAuthStore((s) => s.appState)
   const lock = useAuthStore((s) => s.lock)
   const entries = useVaultStore((s) => s.entries)
+  const notes = useNoteStore((s) => s.notes)
 
   const currentPath = location.pathname
 
@@ -38,6 +40,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     lock()
     navigate('/')
   }
+
+  // Compute storage usage from real data (placeholder values)
+  const storageUsed = 2.46
+  const storageTotal = 10
+  const passwordCount = entries.length
+  const noteCount = notes.length
 
   return (
     <div className="flex h-screen w-screen overflow-hidden" style={{ backgroundColor: '#F8FAFC' }}>
@@ -107,11 +115,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          {/* Entry count */}
+          {/* Storage */}
           <div>
             <div className="flex justify-between text-xs mb-1" style={{ color: '#94A3B8' }}>
-              <span>Entries</span>
-              <span>{entries.length}</span>
+              <span>Storage</span>
+              <span>{storageUsed.toFixed(2)} / {storageTotal} GB</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full" style={{ backgroundColor: '#1E293B' }}>
+              <div
+                className="h-1.5 rounded-full transition-all duration-300"
+                style={{
+                  width: `${(storageUsed / storageTotal) * 100}%`,
+                  backgroundColor: '#2563EB',
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-xs mt-1" style={{ color: '#64748B' }}>
+              <span>{passwordCount} passwords</span>
+              <span>{noteCount} notes</span>
             </div>
           </div>
 

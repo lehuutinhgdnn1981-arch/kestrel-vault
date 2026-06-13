@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import { Sun, Moon, Monitor, ChevronDown, Lock, Shield } from 'lucide-react'
+import {
+  Sun,
+  Moon,
+  Monitor,
+  ChevronDown,
+} from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 
 const categories = [
@@ -58,15 +63,22 @@ export default function Settings() {
 
   return (
     <div className="flex h-full animate-fade-in">
-      <div className="flex flex-col h-full flex-shrink-0"
-        style={{ width: '200px', borderRight: '1px solid #E2E8F0', backgroundColor: '#FFFFFF' }}>
+      {/* Category Sidebar */}
+      <div
+        className="flex flex-col h-full flex-shrink-0"
+        style={{ width: '200px', borderRight: '1px solid #E2E8F0', backgroundColor: '#FFFFFF' }}
+      >
         <div className="p-4">
           <h2 className="text-lg font-semibold mb-4" style={{ color: '#0F172A' }}>Settings</h2>
           <div className="space-y-1">
             {categories.map((cat) => (
               <button key={cat.id} onClick={() => setActiveCategory(cat.id)}
                 className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-150"
-                style={{ backgroundColor: activeCategory === cat.id ? 'rgba(37, 99, 235, 0.1)' : 'transparent', color: activeCategory === cat.id ? '#2563EB' : '#64748B', fontWeight: activeCategory === cat.id ? 500 : 400 }}>
+                style={{
+                  backgroundColor: activeCategory === cat.id ? 'rgba(37, 99, 235, 0.1)' : 'transparent',
+                  color: activeCategory === cat.id ? '#2563EB' : '#64748B',
+                  fontWeight: activeCategory === cat.id ? 500 : 400,
+                }}>
                 {cat.label}
               </button>
             ))}
@@ -74,27 +86,38 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Settings Content */}
       <div className="flex-1 overflow-y-auto p-8" style={{ backgroundColor: '#F8FAFC' }}>
+        {/* General */}
         {activeCategory === 'general' && (
           <div className="max-w-2xl space-y-8">
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Vault</h3>
-              <div className="rounded-xl p-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs font-medium block mb-1" style={{ color: '#64748B' }}>Vault Name</label>
                     <span className="text-sm" style={{ color: '#0F172A' }}>My KESTREL Vault</span>
                   </div>
-                  <button className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
-                    style={{ backgroundColor: '#FFFFFF', color: '#0F172A', border: '1px solid #E2E8F0' }}>
+                  <button
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: '#FFFFFF', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                  >
                     Change Password
                   </button>
                 </div>
               </div>
             </section>
+
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Appearance</h3>
-              <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5 space-y-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div>
                   <label className="text-xs font-medium block mb-3" style={{ color: '#64748B' }}>Theme</label>
                   <div className="flex gap-3">
@@ -108,7 +131,10 @@ export default function Settings() {
                       return (
                         <button key={t.id} onClick={() => setTheme(t.id)}
                           className="flex flex-col items-center gap-2 px-6 py-4 rounded-xl transition-all duration-150"
-                          style={{ backgroundColor: isActive ? 'rgba(37, 99, 235, 0.05)' : '#F8FAFC', border: isActive ? '2px solid #2563EB' : '2px solid #E2E8F0' }}>
+                          style={{
+                            backgroundColor: isActive ? 'rgba(37, 99, 235, 0.05)' : '#F8FAFC',
+                            border: isActive ? '2px solid #2563EB' : '2px solid #E2E8F0',
+                          }}>
                           <Icon size={20} style={{ color: isActive ? '#2563EB' : '#64748B' }} />
                           <span className="text-xs font-medium" style={{ color: isActive ? '#2563EB' : '#475569' }}>{t.label}</span>
                         </button>
@@ -116,41 +142,72 @@ export default function Settings() {
                     })}
                   </div>
                 </div>
+
+                <div className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid #E2E8F0' }}>
+                  <label className="text-sm" style={{ color: '#0F172A' }}>Language</label>
+                  <Select options={['English', 'Spanish', 'French', 'German', 'Vietnamese']} defaultValue="English" />
+                </div>
               </div>
             </section>
+
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Data</h3>
-              <div className="rounded-xl p-5 space-y-3" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
-                <button className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
-                  style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}>Export Vault</button>
-                <button className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
-                  style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}>Import Vault</button>
-                <button className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
-                  style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}>Clear Vault Data</button>
+              <div
+                className="rounded-xl p-5 space-y-3"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
+                <button
+                  className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
+                  style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                >
+                  Export Vault
+                </button>
+                <button
+                  className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
+                  style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                >
+                  Import Vault
+                </button>
+                <button
+                  className="w-full h-10 rounded-lg text-sm font-medium transition-colors"
+                  style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', color: '#EF4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}
+                >
+                  Clear Vault Data
+                </button>
               </div>
             </section>
           </div>
         )}
 
+        {/* Security */}
         {activeCategory === 'security' && (
           <div className="max-w-2xl space-y-8">
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Encryption</h3>
-              <div className="rounded-xl p-5 space-y-4" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5 space-y-4"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Algorithm</label>
                     <span className="text-sm" style={{ color: '#0F172A' }}>AES-256-GCM</span>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                    style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)', color: '#22C55E' }}>Active</span>
+                  <span
+                    className="text-xs px-2.5 py-1 rounded-full font-medium"
+                    style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)', color: '#22C55E' }}
+                  >
+                    Active
+                  </span>
                 </div>
+
                 <div className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
                   <div>
                     <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Key Derivation</label>
                     <span className="text-sm" style={{ color: '#0F172A' }}>Argon2id</span>
                   </div>
                 </div>
+
                 {[
                   { label: 'Memory', value: '128 MB' },
                   { label: 'Iterations', value: '3' },
@@ -158,34 +215,47 @@ export default function Settings() {
                 ].map((param) => (
                   <div key={param.label} className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
                     <span className="text-sm" style={{ color: '#475569' }}>{param.label}</span>
-                    <span className="text-sm font-medium" style={{ color: '#0F172A' }}>{param.value}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium" style={{ color: '#0F172A' }}>{param.value}</span>
+                      <button className="text-xs" style={{ color: '#2563EB' }}>Edit</button>
+                    </div>
                   </div>
                 ))}
               </div>
             </section>
+
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Master Password</h3>
-              <div className="rounded-xl p-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Security</label>
-                    <span className="text-sm" style={{ color: '#0F172A' }}>Protected with Argon2id + AES-256</span>
+                    <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Last changed</label>
+                    <span className="text-sm" style={{ color: '#0F172A' }}>3 months ago</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Lock size={14} style={{ color: '#22C55E' }} />
-                    <Shield size={14} style={{ color: '#22C55E' }} />
-                  </div>
+                  <button
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                  >
+                    Change Password
+                  </button>
                 </div>
               </div>
             </section>
           </div>
         )}
 
+        {/* Auto-lock */}
         {activeCategory === 'autolock' && (
           <div className="max-w-2xl space-y-8">
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Auto-lock</h3>
-              <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5 space-y-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Lock after</label>
@@ -193,6 +263,7 @@ export default function Settings() {
                   </div>
                   <Select options={['5 minutes', '15 minutes', '30 minutes', '1 hour', 'Never']} defaultValue="5 minutes" />
                 </div>
+
                 <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
                   <div>
                     <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Lock on system sleep</label>
@@ -200,6 +271,15 @@ export default function Settings() {
                   </div>
                   <Toggle defaultOn />
                 </div>
+
+                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <div>
+                    <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Lock on window blur</label>
+                    <p className="text-xs" style={{ color: '#64748B' }}>Lock when switching to another application</p>
+                  </div>
+                  <Toggle />
+                </div>
+
                 <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
                   <div>
                     <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Clear clipboard after</label>
@@ -212,11 +292,15 @@ export default function Settings() {
           </div>
         )}
 
+        {/* Backup */}
         {activeCategory === 'backup' && (
           <div className="max-w-2xl space-y-8">
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Backup</h3>
-              <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5 space-y-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Automatic backups</label>
@@ -224,24 +308,50 @@ export default function Settings() {
                   </div>
                   <Toggle defaultOn />
                 </div>
+
+                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <label className="text-sm" style={{ color: '#0F172A' }}>Backup location</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono-geist px-3 py-1.5 rounded" style={{ backgroundColor: '#F8FAFC', color: '#475569' }}>
+                      ~/Backups/KESTREL
+                    </span>
+                    <button className="text-xs" style={{ color: '#2563EB' }}>Browse</button>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
                   <label className="text-sm" style={{ color: '#0F172A' }}>Backup frequency</label>
                   <Select options={['Daily', 'Weekly', 'Monthly']} defaultValue="Weekly" />
                 </div>
+
                 <div className="pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
-                  <button className="px-6 h-10 rounded-lg text-sm font-medium transition-colors"
-                    style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}>Backup Now</button>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Last backup</label>
+                      <span className="text-sm" style={{ color: '#0F172A' }}>May 19, 2024 09:15 PM</span>
+                    </div>
+                  </div>
+                  <button
+                    className="px-6 h-10 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
+                  >
+                    Backup Now
+                  </button>
                 </div>
               </div>
             </section>
           </div>
         )}
 
+        {/* Advanced */}
         {activeCategory === 'advanced' && (
           <div className="max-w-2xl space-y-8">
             <section>
               <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Advanced</h3>
-              <div className="rounded-xl p-5 space-y-5" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}>
+              <div
+                className="rounded-xl p-5 space-y-5"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Debug mode</label>
@@ -249,9 +359,23 @@ export default function Settings() {
                   </div>
                   <Toggle />
                 </div>
+
+                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <div>
+                    <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Reset all settings</label>
+                    <p className="text-xs" style={{ color: '#64748B' }}>Restore default settings (does not delete data)</p>
+                  </div>
+                  <button
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                  >
+                    Reset
+                  </button>
+                </div>
+
                 <div className="pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
                   <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Version</label>
-                  <p className="text-xs font-mono-geist" style={{ color: '#64748B' }}>KESTREL Vault v0.1.0</p>
+                  <p className="text-xs font-mono-geist" style={{ color: '#64748B' }}>KESTREL Vault v1.0.0 (Build 2024.05.20)</p>
                 </div>
               </div>
             </section>

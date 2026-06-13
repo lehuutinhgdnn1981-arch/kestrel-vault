@@ -2,17 +2,36 @@ import { useState, useEffect } from 'react'
 import {
   Search,
   Plus,
+  List,
+  Users,
+  Briefcase,
+  CreditCard,
+  User,
+  Inbox,
   Copy,
   Eye,
   EyeOff,
   Pencil,
   Trash2,
-  Inbox,
   ChevronDown,
 } from 'lucide-react'
 import { useVaultStore } from '@/stores/vault-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { vaultCommands } from '@/lib/tauri'
+
+const folders = [
+  { id: 'all', label: 'All Items', icon: List },
+  { id: 'social', label: 'Social', icon: Users },
+  { id: 'work', label: 'Work', icon: Briefcase },
+  { id: 'finance', label: 'Finance', icon: CreditCard },
+  { id: 'personal', label: 'Personal', icon: User },
+  { id: 'none', label: 'No Folder', icon: Inbox },
+]
+
+const avatarColors: Record<string, string> = {
+  Google: '#4285F4', Facebook: '#1877F2', GitHub: '#333333', Discord: '#5865F2',
+  Netflix: '#E50914', Spotify: '#1DB954', Twitter: '#1DA1F2', 'AWS Console': '#FF9900',
+}
 
 export default function PasswordVault() {
   const entries = useVaultStore((s) => s.entries)
@@ -22,6 +41,7 @@ export default function PasswordVault() {
   const selectEntry = useVaultStore((s) => s.selectEntry)
   const appState = useAuthStore((s) => s.appState)
 
+  const [activeFolder, setActiveFolder] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
@@ -30,11 +50,23 @@ export default function PasswordVault() {
     if (appState === 'unlocked') fetchEntries()
   }, [appState, fetchEntries])
 
-  const filteredItems = entries.filter((item) =>
-    !searchQuery ||
-    item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.username.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredItems = entries.filter((item) => {
+    const matchesSearch = !searchQuery ||
+      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.url ?? '').toLowerCase().includes(searchQuery.toLowerCase())
+
+    // Filter by folder (based on URL domain heuristic)
+    const domain = (item.url ?? '').toLowerCase()
+    const matchesFolder = activeFolder === 'all' ||
+      (activeFolder === 'social' && (domain.includes('facebook') || domain.includes('twitter') || domain.includes('discord') || domain.includes('instagram'))) ||
+      (activeFolder === 'work' && (domain.includes('github') || domain.includes('aws') || domain.includes('slack') || domain.includes('jira'))) ||
+      (activeFolder === 'finance' && (domain.includes('bank') || domain.includes('paypal') || domain.includes('stripe'))) ||
+      (activeFolder === 'personal' && (domain.includes('netflix') || domain.includes('spotify') || domain.includes('gmail') || domain.includes('google'))) ||
+      (activeFolder === 'none' && !item.url)
+
+    return matchesFolder && matchesSearch
+  })
 
   const selectedItem = entries.find((e) => e.id === selectedEntryId) ?? null
 
@@ -82,12 +114,37 @@ export default function PasswordVault() {
             <Plus size={16} /> Add Item
           </button>
         </div>
+
         <div className="flex-1 overflow-y-auto px-2">
+          {folders.map((folder) => {
+            const isActive = activeFolder === folder.id
+            const Icon = folder.icon
+            return (
+              <button
+                key={folder.id}
+                onClick={() => setActiveFolder(folder.id)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 mb-0.5"
+                style={{
+                  backgroundColor: isActive ? '#F8FAFC' : 'transparent',
+                  borderLeft: isActive ? '3px solid #2563EB' : '3px solid transparent',
+                  color: isActive ? '#0F172A' : '#64748B',
+                }}
+              >
+                <Icon size={16} />
+                <span className="text-sm flex-1">{folder.label}</span>
+              </button>
+            )
+          })}
           <div className="px-3 py-2">
-            <span className="text-sm" style={{ color: '#64748B' }}>
-              {filteredItems.length} entries
-            </span>
+            <button className="text-sm font-medium" style={{ color: '#2563EB' }}>+ New Folder</button>
           </div>
+        </div>
+
+        <div className="p-4 flex items-center gap-2" style={{ borderTop: '1px solid #E2E8F0' }}>
+          <div className="w-5 h-5 rounded flex items-center justify-center" style={{ backgroundColor: '#0F172A' }}>
+            <img src="/kestrel-logo.png" alt="" className="w-3 h-3 object-contain" />
+          </div>
+          <span className="text-xs" style={{ color: '#94A3B8' }}>{entries.length} entries</span>
         </div>
       </div>
 
@@ -96,10 +153,17 @@ export default function PasswordVault() {
         style={{ borderRight: '1px solid #E2E8F0', minWidth: '320px', backgroundColor: '#FFFFFF' }}>
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #E2E8F0' }}>
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold" style={{ color: '#0F172A' }}>All Items</h3>
+            <h3 className="text-sm font-semibold" style={{ color: '#0F172A' }}>
+              {folders.find((f) => f.id === activeFolder)?.label || 'All Items'}
+            </h3>
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>
               {filteredItems.length}
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="flex items-center gap-1 text-xs px-2 py-1 rounded" style={{ color: '#64748B', border: '1px solid #E2E8F0' }}>
+              Sort by: Name <ChevronDown size={12} />
+            </button>
           </div>
         </div>
 
@@ -113,6 +177,7 @@ export default function PasswordVault() {
           ) : (
             filteredItems.map((item) => {
               const isSelected = selectedEntryId === item.id
+              const color = avatarColors[item.title] || '#64748B'
               return (
                 <button
                   key={item.id}
@@ -124,8 +189,10 @@ export default function PasswordVault() {
                     borderBottom: '1px solid #F1F5F9',
                   }}
                 >
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0"
-                    style={{ backgroundColor: '#2563EB' }}>
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0"
+                    style={{ backgroundColor: color }}
+                  >
                     {item.title[0]}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -151,8 +218,10 @@ export default function PasswordVault() {
             <div className="p-5" style={{ borderBottom: '1px solid #E2E8F0' }}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-base font-semibold"
-                    style={{ backgroundColor: '#2563EB' }}>
+                  <div
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-white text-base font-semibold"
+                    style={{ backgroundColor: avatarColors[selectedItem.title] || '#64748B' }}
+                  >
                     {selectedItem.title[0]}
                   </div>
                   <div>
@@ -164,7 +233,7 @@ export default function PasswordVault() {
                   <button className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
                     <Pencil size={15} />
                   </button>
-                  <button onClick={() => handleDelete(selectedItem.id)} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#EF4444' }}>
+                  <button onClick={() => handleDelete(selectedItem.id)} className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#64748B' }}>
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -222,12 +291,8 @@ export default function PasswordVault() {
 
             <div className="mt-auto p-5" style={{ borderTop: '1px solid #E2E8F0' }}>
               <div className="space-y-1">
-                <p className="text-xs" style={{ color: '#94A3B8' }}>
-                  Created: {new Date(selectedItem.created_at).toLocaleDateString()}
-                </p>
-                <p className="text-xs" style={{ color: '#94A3B8' }}>
-                  Updated: {new Date(selectedItem.updated_at).toLocaleDateString()}
-                </p>
+                <p className="text-xs" style={{ color: '#94A3B8' }}>Created: {new Date(selectedItem.created_at).toLocaleDateString()}</p>
+                <p className="text-xs" style={{ color: '#94A3B8' }}>Updated: {new Date(selectedItem.updated_at).toLocaleDateString()}</p>
               </div>
             </div>
           </div>
