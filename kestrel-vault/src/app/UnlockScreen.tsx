@@ -18,6 +18,7 @@ export const UnlockScreen: React.FC = () => {
   const unlockState = useAuthStore((s) => s.unlockState);
   const error = useAuthStore((s) => s.error);
   const unlock = useAuthStore((s) => s.unlock);
+  const createVault = useAuthStore((s) => s.createVault);
   const isInitialized = useAuthStore((s) => s.isInitialized);
   const clearError = useAuthStore((s) => s.clearError);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,9 +32,13 @@ export const UnlockScreen: React.FC = () => {
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!masterPassword.trim()) return;
-      await unlock(masterPassword);
+      if (isInitialized) {
+        await unlock(masterPassword);
+      } else {
+        await createVault(masterPassword);
+      }
     },
-    [masterPassword, unlock],
+    [masterPassword, unlock, createVault, isInitialized],
   );
 
   const handlePasswordChange = useCallback(

@@ -55,6 +55,23 @@ async function safeInvoke<T>(
       );
     }
 
+    // Handle Tauri CommandError objects: { code, message }
+    // Rust serializes CommandError as JSON, so JS receives an object.
+    // Using String() on it would produce "[object Object]".
+    if (typeof error === "object" && error !== null) {
+      const errObj = error as Record<string, unknown>;
+      const message =
+        typeof errObj.message === "string"
+          ? errObj.message
+          : JSON.stringify(error);
+      const code =
+        typeof errObj.code === "string"
+          ? String(errObj.code)
+          : "COMMAND_FAILED";
+      throw new TauriCommandError(code, message, command);
+    }
+
+    // Fallback for string or other primitive errors
     const errStr = String(error);
     throw new TauriCommandError("UNKNOWN", errStr, command);
   }
