@@ -66,9 +66,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 once_cell = "1"
 parking_lot = "0.12"
 
-# Force reqwest without brotli to avoid alloc_no_stdlib v2/v3 conflict in brotli 8.x
-reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls"] }
-
 [profile.release]
 strip = true
 lto = true
