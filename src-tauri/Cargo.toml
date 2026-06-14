@@ -21,7 +21,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri v2 core - disable default-features to prevent brotli 8.x (alloc_no_stdlib conflict)
-tauri = { version = "2", default-features = false, features = ["tray-icon", "wry", "common-controls"] }
+tauri = { version = "2", default-features = false, features = ["tray-icon", "wry", "common-controls-v6"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
