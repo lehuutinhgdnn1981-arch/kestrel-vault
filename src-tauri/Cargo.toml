@@ -66,6 +66,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 once_cell = "1"
 parking_lot = "0.12"
 
+# Pin brotli to avoid alloc_no_stdlib v2/v3 conflict in brotli 8.x
+brotli = "7.0.0"
+
 [profile.release]
 strip = true
 lto = true
