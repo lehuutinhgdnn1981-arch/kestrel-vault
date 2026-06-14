@@ -119,7 +119,12 @@
   }
 }
 
-/* Animations */
+/* ═══════════════════════════════════════════════════════════════
+   Animations — smooth, professional motion system
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- Keyframes --- */
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   10%, 50%, 90% { transform: translateX(-4px); }
@@ -136,9 +141,34 @@
   to { opacity: 1; }
 }
 
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes countUp {
@@ -151,18 +181,125 @@
   50% { opacity: 0.5; }
 }
 
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes staggerIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes expandHeight {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 500px; opacity: 1; }
+}
+
+@keyframes collapseHeight {
+  from { max-height: 500px; opacity: 1; }
+  to { max-height: 0; opacity: 0; }
+}
+
+/* --- Animation classes --- */
+
 .animate-shake {
   animation: shake 300ms ease-in-out;
 }
 
 .animate-fade-in {
-  animation: fadeIn 200ms ease-out;
+  animation: fadeIn 250ms ease-out both;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in-down {
+  animation: fadeInDown 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in-scale {
+  animation: fadeInScale 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-slide-up {
-  animation: slideUp 200ms ease-out;
+  animation: slideUp 250ms ease-out both;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-count-up {
   animation: countUp 600ms ease-out forwards;
+}
+
+.animate-stagger-in {
+  animation: staggerIn 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.08) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-expand {
+  animation: expandHeight 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-collapse {
+  animation: collapseHeight 200ms ease-in both;
+}
+
+/* --- Global smooth transitions --- */
+
+* {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Exclude elements that have their own transition timing */
+*[style*="transition"],
+*[class*="transition"],
+video, canvas, img, svg {
+  transition: none;
+}
+
+/* Smooth theme transitions */
+body, .dark, .light {
+  transition: background-color 300ms ease, color 200ms ease;
+}
+
+/* --- Interactive hover/press effects --- */
+
+.hover-lift {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 200ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.hover-lift:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.press-scale {
+  transition: transform 100ms ease;
+}
+.press-scale:active {
+  transform: scale(0.97);
+}
+
+/* --- Page transition container --- */
+
+.page-enter {
+  animation: fadeInUp 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
