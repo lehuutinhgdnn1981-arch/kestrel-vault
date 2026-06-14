@@ -1,7 +1,0 @@
-# KESTREL Vault — Clippy Lint Configuration
-# ===========================================
-# Customizes clippy lint thresholds for the KESTREL Vault codebase.
-
-cognitive-complexity-threshold = 25
-type-complexity-threshold = 250
-too-many-arguments-threshold = 7
