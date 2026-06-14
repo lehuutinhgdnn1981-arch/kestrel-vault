@@ -122,7 +122,7 @@ export default function ThreatScanner() {
             {isScanning ? 'Checking your vault for threats' : lastScanResults.length > 0 && currentStatus !== 'safe' ? 'Review the detected issues below' : 'Your vault is safe'}
           </p>
           <p className="text-xs mb-6" style={{ color: '#94A3B8' }}>
-            {isScanning ? `${Math.round(scanProgress)}% complete` : history.length > 0 ? `Last scan: ${history[0].date}` : 'Run a scan to check your vault'}
+            {isScanning ? `${Math.round(scanProgress)}% complete` : history.length > 0 ? `Last scan: ${history[0]?.date}` : 'Run a scan to check your vault'}
           </p>
 
           {isScanning && (

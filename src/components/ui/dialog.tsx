@@ -81,6 +81,7 @@ export const Dialog: React.FC<DialogProps> = ({
       document.addEventListener("keydown", handleKeyDown);
       return () => document.removeEventListener("keydown", handleKeyDown);
     }
+    return undefined;
   }, [open, handleKeyDown]);
 
   // Focus trap
@@ -102,12 +103,12 @@ export const Dialog: React.FC<DialogProps> = ({
     if (e.shiftKey) {
       if (document.activeElement === first) {
         e.preventDefault();
-        last.focus();
+        last?.focus();
       }
     } else {
       if (document.activeElement === last) {
         e.preventDefault();
-        first.focus();
+        first?.focus();
       }
     }
   }, []);
@@ -120,6 +121,7 @@ export const Dialog: React.FC<DialogProps> = ({
         document.body.style.overflow = "";
       };
     }
+    return undefined;
   }, [open]);
 
   if (!open) return null;

@@ -211,7 +211,7 @@ export default function AuditLogs() {
 
                 {logs.map((log) => {
                   const severity = getEventSeverity(log.type)
-                  const config = severityConfig[severity]
+                  const config = severityConfig[severity] ?? severityConfig.info
                   const EventIcon = eventIcons[log.type] || Settings
                   return (
                     <div key={log.id} className="relative mb-4">

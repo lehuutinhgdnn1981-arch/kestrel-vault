@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { Lock, Eye, EyeOff, ArrowRight, Shield } from 'lucide-react'
+import { Eye, EyeOff, ArrowRight, Shield } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 
 export default function UnlockScreen() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isShaking, setIsShaking] = useState(false)
+  const [isShaking] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const unlock = useAuthStore((s) => s.unlock)

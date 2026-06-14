@@ -1,0 +1,25 @@
+# KESTREL Vault — Cargo Build Configuration
+# ===========================================
+
+[build]
+# Use a dedicated target directory to avoid polluting the project root
+target-dir = "target"
+
+[profile.dev]
+# Faster dev builds at the cost of slightly slower runtime
+opt-level = 0
+debug = true
+incremental = true
+
+[profile.release]
+# Aggressive optimizations for release builds
+opt-level = "z"     # Optimize for binary size
+lto = true          # Enable Link-Time Optimization
+codegen-units = 1   # Maximize LTO effectiveness (slower build, smaller binary)
+strip = true        # Strip debug symbols from release binary
+panic = "abort"     # Smaller binary by aborting on panic instead of unwinding
+debug = false
+
+[profile.release.package."*"]
+# Optimize all dependencies for size in release builds
+opt-level = "z"

@@ -47,6 +47,7 @@ const riskConfig: Record<string, { color: string; bg: string; label: string }> =
   safe: { color: '#22C55E', bg: 'rgba(34, 197, 94, 0.1)', label: 'Safe' },
   warning: { color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)', label: 'Warning' },
   danger: { color: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)', label: 'Danger' },
+  unknown: { color: '#94A3B8', bg: 'rgba(148, 163, 184, 0.1)', label: 'Unknown' },
 }
 
 const storageUsed = 2.46
@@ -173,7 +174,7 @@ export default function FileVault() {
           {filteredFiles.map((file) => {
             const isSelected = selectedFileId === file.id
             const color = fileTypeColors[file.type] || '#64748B'
-            const risk = riskConfig[file.risk]
+            const risk = riskConfig[file.risk] ?? riskConfig.unknown
             return (
               <button
                 key={file.id}

@@ -12,7 +12,7 @@
  */
 
 import { create } from "zustand";
-import { authCommands, type SessionInfo, type VaultStatus } from "@/lib/tauri";
+import { authCommands, type SessionInfo } from "@/lib/tauri";
 import type { AppState, UnlockState, VaultLifecycleState } from "@/types/app";
 import { DEFAULT_SETTINGS, TIMEOUTS } from "@/lib/constants";
 import { useVaultStore } from "@/stores/vault-store";
@@ -100,7 +100,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           appState: "unlocked",
           session,
           isInitialized: true,
-          vaultState: vaultStatus.state,
+          vaultState: vaultStatus.state as VaultLifecycleState,
           failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
           isLockedOut: vaultStatus.is_locked_out,
           lastActivity: Date.now(),
@@ -109,7 +109,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         set({
           appState: isInitialized ? "locked" : "locked",
           isInitialized,
-          vaultState: vaultStatus.state,
+          vaultState: vaultStatus.state as VaultLifecycleState,
           failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
           isLockedOut: vaultStatus.is_locked_out,
         });
