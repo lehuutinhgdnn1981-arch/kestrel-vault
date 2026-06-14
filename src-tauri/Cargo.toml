@@ -20,8 +20,16 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Tauri v2 core
-tauri = { version = "2", features = ["tray-icon"] }
+# Tauri v2 core - disable ALL default features to prevent pulling in
+# brotli 8.x through reqwest (which causes alloc-no_stdlib v2/v3 conflict).
+# Only enable the features we actually need.
+tauri = { version = "2", default-features = false, features = [
+    "tray-icon",
+    "wry",
+    "common-controls-v6",
+    "image-ico",
+    "image-png",
+] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -67,8 +75,9 @@ once_cell = "1"
 parking_lot = "0.12"
 dirs = "5"
 
-# HTTP client (for HIBP breach check)
-reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+# HTTP client (for HIBP breach check) - explicitly NO brotli/deflate/gzip features
+# to prevent pulling in brotli 8.x which causes alloc-no_stdlib v2/v3 conflict
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
 sha1 = "0.10"
 
 [profile.release]
