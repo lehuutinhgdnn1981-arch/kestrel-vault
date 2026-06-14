@@ -22,6 +22,7 @@
 
 pub mod audit_commands;
 pub mod auth_commands;
+pub mod backup_commands;
 pub mod crypto_commands;
 pub mod folder_commands;
 pub mod note_commands;

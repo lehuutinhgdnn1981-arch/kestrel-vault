@@ -429,3 +429,39 @@ export interface FileEntryView {
   created_at: string;
   updated_at: string;
 }
+
+// ─── Backup Commands ───────────────────────────────────────────────
+
+export interface BackupInfo {
+  path: string;
+  file_size_bytes: number;
+  created_at: string;
+  schema_version: number;
+  entry_count: number;
+}
+
+export const backupCommands = {
+  /** Create encrypted backup at specified path */
+  createBackup: (backupPath: string): Promise<BackupInfo> =>
+    safeInvoke("backup_create", { backupPath }),
+
+  /** Verify a backup file */
+  verifyBackup: (backupPath: string): Promise<boolean> =>
+    safeInvoke("backup_verify", { backupPath }),
+
+  /** List backup files in directory */
+  listBackups: (backupDir: string): Promise<string[]> =>
+    safeInvoke("backup_list", { backupDir }),
+
+  /** Delete a backup file */
+  deleteBackup: (backupPath: string): Promise<void> =>
+    safeInvoke("backup_delete", { backupPath }),
+
+  /** Export vault data as encrypted JSON */
+  exportEncrypted: (): Promise<unknown> =>
+    safeInvoke("backup_export_encrypted"),
+
+  /** Restore vault from backup file */
+  restoreBackup: (backupPath: string): Promise<void> =>
+    safeInvoke("backup_restore", { backupPath }),
+} as const;

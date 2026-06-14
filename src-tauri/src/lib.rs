@@ -118,6 +118,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Settings commands
             commands::settings_commands::settings_get,
             commands::settings_commands::settings_update,
+            // Backup commands
+            commands::backup_commands::backup_create,
+            commands::backup_commands::backup_verify,
+            commands::backup_commands::backup_list,
+            commands::backup_commands::backup_delete,
+            commands::backup_commands::backup_export_encrypted,
+            commands::backup_commands::backup_restore,
         ])
         .run(tauri::generate_context!())?;
 

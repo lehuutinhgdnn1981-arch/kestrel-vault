@@ -5,9 +5,15 @@ import {
   Monitor,
   ChevronDown,
   X,
+  Download,
+  Upload,
+  FolderOpen,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
-import { settingsCommands, authCommands, type AppSettings } from '@/lib/tauri'
+import { settingsCommands, authCommands, backupCommands, type AppSettings } from '@/lib/tauri'
+import { save, open, message } from '@tauri-apps/plugin-dialog'
 
 const categories = [
   { id: 'general', label: 'General' },
@@ -420,47 +426,142 @@ export default function Settings() {
         {activeCategory === 'backup' && (
           <div className="max-w-2xl space-y-8">
             <section>
-              <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Backup</h3>
+              <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Backup & Restore</h3>
               <div
                 className="rounded-xl p-5 space-y-5"
                 style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
               >
+                {/* Export Backup */}
                 <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Automatic backups</label>
-                    <p className="text-xs" style={{ color: '#64748B' }}>Create encrypted backups on a schedule</p>
-                  </div>
-                  <Toggle defaultOn />
-                </div>
-
-                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
-                  <label className="text-sm" style={{ color: '#0F172A' }}>Backup location</label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono-geist px-3 py-1.5 rounded" style={{ backgroundColor: '#F8FAFC', color: '#475569' }}>
-                      ~/Backups/KESTREL
-                    </span>
-                    <button className="text-xs" style={{ color: '#2563EB' }}>Browse</button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
-                  <label className="text-sm" style={{ color: '#0F172A' }}>Backup frequency</label>
-                  <Select options={['Daily', 'Weekly', 'Monthly']} defaultValue="Weekly" />
-                </div>
-
-                <div className="pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(37, 99, 235, 0.1)' }}>
+                      <Download size={18} style={{ color: '#2563EB' }} />
+                    </div>
                     <div>
-                      <label className="text-xs font-medium block mb-0.5" style={{ color: '#64748B' }}>Last backup</label>
-                      <span className="text-sm" style={{ color: '#0F172A' }}>May 19, 2024 09:15 PM</span>
+                      <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Export Backup</label>
+                      <p className="text-xs" style={{ color: '#64748B' }}>Create an encrypted backup of your vault</p>
                     </div>
                   </div>
                   <button
-                    className="px-6 h-10 rounded-lg text-sm font-medium transition-colors"
+                    onClick={async () => {
+                      try {
+                        const filePath = await save({
+                          defaultPath: `kestrel_vault_backup_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`,
+                          filters: [{ name: 'Database', extensions: ['db'] }],
+                        })
+                        if (filePath) {
+                          const info = await backupCommands.createBackup(filePath)
+                          await message(`Backup created successfully!\n${info.entry_count} entries backed up.\nSize: ${(info.file_size_bytes / 1024).toFixed(1)} KB`, { title: 'Backup Complete', kind: 'info' })
+                        }
+                      } catch (e: any) {
+                        await message(`Backup failed: ${e?.message || e}`, { title: 'Backup Error', kind: 'error' })
+                      }
+                    }}
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                     style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
                   >
-                    Backup Now
+                    <Download size={14} />
+                    Export
                   </button>
+                </div>
+
+                {/* Import/Restore Backup */}
+                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)' }}>
+                      <Upload size={18} style={{ color: '#22C55E' }} />
+                    </div>
+                    <div>
+                      <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Restore from Backup</label>
+                      <p className="text-xs" style={{ color: '#64748B' }}>Replace vault data with a backup file</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const filePath = await open({
+                          filters: [{ name: 'Database', extensions: ['db'] }],
+                          multiple: false,
+                        })
+                        if (filePath) {
+                          const confirmed = await message(
+                            'Restoring from backup will replace all current vault data. You will need to re-enter your master password. Continue?',
+                            { title: 'Confirm Restore', kind: 'warning', okLabel: 'Restore', cancelLabel: 'Cancel' }
+                          )
+                          if (confirmed) {
+                            await backupCommands.restoreBackup(filePath as string)
+                            await message('Vault restored successfully. Please unlock with your master password.', { title: 'Restore Complete', kind: 'info' })
+                          }
+                        }
+                      } catch (e: any) {
+                        await message(`Restore failed: ${e?.message || e}`, { title: 'Restore Error', kind: 'error' })
+                      }
+                    }}
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                    style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                  >
+                    <Upload size={14} />
+                    Restore
+                  </button>
+                </div>
+
+                {/* Export Encrypted JSON */}
+                <div className="flex items-center justify-between pt-4" style={{ borderTop: '1px solid #F1F5F9' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)' }}>
+                      <FolderOpen size={18} style={{ color: '#8B5CF6' }} />
+                    </div>
+                    <div>
+                      <label className="text-sm block mb-0.5" style={{ color: '#0F172A' }}>Export Encrypted JSON</label>
+                      <p className="text-xs" style={{ color: '#64748B' }}>Export vault data as encrypted JSON for migration</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const filePath = await save({
+                          defaultPath: `kestrel_vault_export_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`,
+                          filters: [{ name: 'JSON', extensions: ['json'] }],
+                        })
+                        if (filePath) {
+                          const exportData = await backupCommands.exportEncrypted()
+                          // Write JSON to file using Tauri FS
+                          const { writeFile } = await import('@tauri-apps/plugin-fs')
+                          await writeFile(filePath, new TextEncoder().encode(JSON.stringify(exportData, null, 2)))
+                          await message('Encrypted export saved successfully.', { title: 'Export Complete', kind: 'info' })
+                        }
+                      } catch (e: any) {
+                        await message(`Export failed: ${e?.message || e}`, { title: 'Export Error', kind: 'error' })
+                      }
+                    }}
+                    className="px-4 h-9 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                    style={{ backgroundColor: '#F8FAFC', color: '#0F172A', border: '1px solid #E2E8F0' }}
+                  >
+                    <FolderOpen size={14} />
+                    Export JSON
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Backup Info */}
+            <section>
+              <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Backup Information</h3>
+              <div
+                className="rounded-xl p-5 space-y-4"
+                style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
+              >
+                <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.1)' }}>
+                  <AlertCircle size={16} style={{ color: '#2563EB' }} />
+                  <p className="text-xs" style={{ color: '#475569' }}>
+                    All backups are encrypted with your master password. You will need your master password to restore from any backup.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: 'rgba(34, 197, 94, 0.05)', border: '1px solid rgba(34, 197, 94, 0.1)' }}>
+                  <CheckCircle2 size={16} style={{ color: '#22C55E' }} />
+                  <p className="text-xs" style={{ color: '#475569' }}>
+                    Backups use the same AES-256-GCM encryption as your vault. Data remains encrypted at all times.
+                  </p>
                 </div>
               </div>
             </section>
