@@ -53,8 +53,9 @@ export function useAutoLock(): void {
   }, [appState, handleActivity]);
 
   // Set up auto-lock check interval
+  // autoLockMinutes = 0 means "Never" (auto-lock disabled)
   useEffect(() => {
-    if (appState !== "unlocked") {
+    if (appState !== "unlocked" || autoLockMinutes === 0) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;

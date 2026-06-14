@@ -10,12 +10,12 @@
 
 export const ROUTES = {
   HOME: "/",
-  VAULT: "/",
+  VAULT: "/vault",
   NOTES: "/notes",
   FILES: "/files",
   SCANNER: "/scanner",
   AUDIT: "/audit",
-  SECURITY_CENTER: "/security-center",
+  SECURITY_CENTER: "/security",
   SETTINGS: "/settings",
 } as const;
 

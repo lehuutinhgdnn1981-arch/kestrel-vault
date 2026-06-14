@@ -7,6 +7,7 @@
 import { create } from "zustand";
 import type { Theme } from "@/types/app";
 import { DEFAULT_SETTINGS } from "@/lib/constants";
+import { setLocale, type Locale } from "@/lib/i18n";
 
 type ActiveModule =
   | "vault"
@@ -24,6 +25,8 @@ interface AppState {
   theme: Theme;
   /** Whether sidebar is collapsed */
   sidebarCollapsed: boolean;
+  /** UI language */
+  language: Locale;
   /** Global search query */
   searchQuery: string;
   /** Toast notifications */
@@ -37,6 +40,9 @@ interface AppState {
 }
 
 interface AppActions {
+  /** Set language */
+  setLanguage: (language: Locale) => void;
+
   /** Set the active module */
   setActiveModule: (module: ActiveModule) => void;
 
@@ -64,9 +70,15 @@ let toastCounter = 0;
 export const useAppStore = create<AppState & AppActions>((set) => ({
   activeModule: "vault",
   theme: DEFAULT_SETTINGS.theme,
+  language: (DEFAULT_SETTINGS.language as Locale) || "en",
   sidebarCollapsed: false,
   searchQuery: "",
   toasts: [],
+
+  setLanguage: (language: Locale) => {
+    set({ language });
+    setLocale(language);
+  },
 
   setActiveModule: (module: ActiveModule) => {
     set({ activeModule: module });

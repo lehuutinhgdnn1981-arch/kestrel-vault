@@ -53,6 +53,12 @@ pub struct FolderRow {
 /// being passed to the repository.
 #[derive(Debug, Clone)]
 pub struct CreateFolderRequest {
+    /// Pre-generated folder ID (UUID v4).
+    /// The ID must be generated BEFORE encryption because it is
+    /// used as the AAD context. If None, the repo will generate one
+    /// (but this will cause decryption failures if the name was
+    /// encrypted with a different ID).
+    pub id: Option<String>,
     /// Encrypted folder name (already encrypted).
     pub encrypted_name: Vec<u8>,
     /// Nonce used for name encryption.
@@ -77,11 +83,17 @@ pub struct FolderRepo;
 
 impl FolderRepo {
     /// Creates a new folder.
+    ///
+    /// The folder ID should be pre-generated and passed in the request
+    /// so that it matches the AAD context used during name encryption.
+    /// If no ID is provided, a new one is generated (but this will
+    /// cause decryption failures if the name was encrypted with a
+    /// different ID as AAD context).
     pub async fn create(
         pool: &SqlitePool,
         request: CreateFolderRequest,
     ) -> KestrelResult<FolderRow> {
-        let id = Uuid::new_v4().to_string();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
@@ -194,6 +206,19 @@ impl FolderRepo {
             return Err(KestrelError::Vault(format!("Folder not found: {id}")));
         }
         Ok(())
+    }
+
+    /// Deletes ALL folders.
+    ///
+    /// Use with extreme caution — this is irreversible.
+    /// Note: CASCADE will set folder_id to NULL on orphaned entries.
+    pub async fn delete_all(pool: &SqlitePool) -> KestrelResult<u64> {
+        let result = sqlx::query("DELETE FROM folders")
+            .execute(pool)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to delete all folders: {e}")))?;
+
+        Ok(result.rows_affected())
     }
 
     /// Lists all root-level folders (parent_id IS NULL).
@@ -316,6 +341,7 @@ mod tests {
     #[test]
     fn create_folder_request_builds() {
         let req = CreateFolderRequest {
+            id: None,
             encrypted_name: vec![1, 2, 3],
             nonce: vec![4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             parent_id: None,

@@ -86,17 +86,52 @@ const config: Config = {
           from: { transform: "translateY(4px)", opacity: "0" },
           to: { transform: "translateY(0)", opacity: "1" },
         },
+        "slide-in-from-right": {
+          from: { transform: "translateX(12px)", opacity: "0" },
+          to: { transform: "translateX(0)", opacity: "1" },
+        },
+        "slide-in-from-left": {
+          from: { transform: "translateX(-12px)", opacity: "0" },
+          to: { transform: "translateX(0)", opacity: "1" },
+        },
+        "scale-in": {
+          from: { transform: "scale(0.96)", opacity: "0" },
+          to: { transform: "scale(1)", opacity: "1" },
+        },
+        "blur-in": {
+          from: { filter: "blur(4px)", opacity: "0" },
+          to: { filter: "blur(0px)", opacity: "1" },
+        },
+        "stagger-in": {
+          from: { transform: "translateY(8px)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
         "spin-slow": {
           from: { transform: "rotate(0deg)" },
           to: { transform: "rotate(360deg)" },
         },
+        "pulse-soft": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.7" },
+        },
+        "shimmer": {
+          from: { backgroundPosition: "200% 0" },
+          to: { backgroundPosition: "-200% 0" },
+        },
       },
       animation: {
-        "fade-in": "fade-in 150ms ease-out",
+        "fade-in": "fade-in 200ms ease-out",
         "fade-out": "fade-out 150ms ease-in",
-        "slide-in-from-top": "slide-in-from-top 200ms ease-out",
-        "slide-in-from-bottom": "slide-in-from-bottom 200ms ease-out",
+        "slide-in-from-top": "slide-in-from-top 250ms ease-out",
+        "slide-in-from-bottom": "slide-in-from-bottom 250ms ease-out",
+        "slide-in-from-right": "slide-in-from-right 300ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "slide-in-from-left": "slide-in-from-left 300ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "scale-in": "scale-in 250ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "blur-in": "blur-in 300ms ease-out",
+        "stagger-in": "stagger-in 300ms cubic-bezier(0.16, 1, 0.3, 1)",
         "spin-slow": "spin-slow 2s linear infinite",
+        "pulse-soft": "pulse-soft 2s ease-in-out infinite",
+        "shimmer": "shimmer 2s ease-in-out infinite",
       },
       typography: {
         DEFAULT: {

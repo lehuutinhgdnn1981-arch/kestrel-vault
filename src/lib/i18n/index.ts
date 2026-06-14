@@ -1,50 +1,64 @@
 /**
- * i18n module for KESTREL Vault.
+ * Lightweight i18n system for KESTREL Vault.
  *
- * Provides translation functions and locale management.
- * Supported locales: en (English), vi (Vietnamese)
+ * Usage:
+ *   import { t } from '@/lib/i18n'
+ *   t('nav.dashboard')  // → "Dashboard" or "Bảng điều khiển"
+ *
+ * In React components, use the `useI18n` hook for reactive updates:
+ *   const { t } = useI18n()
+ *   <h1>{t('nav.dashboard')}</h1>
  */
 
 import en, { type TranslationKey } from './en'
 import vi from './vi'
 
+export type { TranslationKey }
+
 export type Locale = 'en' | 'vi'
 
-type TranslationMap = Record<TranslationKey, string>
+const translations: Record<Locale, Record<TranslationKey, string>> = {
+  en,
+  vi,
+}
 
-const translations: Record<Locale, TranslationMap> = { en, vi }
-
+/** Current locale — defaults to 'en', updated by the i18n store */
 let currentLocale: Locale = 'en'
 
-const listeners = new Set<() => void>()
+/** Set the current locale */
+export function setLocale(locale: Locale) {
+  currentLocale = locale
+}
 
 /** Get the current locale */
 export function getLocale(): Locale {
   return currentLocale
 }
 
-/** Set the locale and notify all subscribers */
-export function setLocale(locale: Locale): void {
-  currentLocale = locale
-  listeners.forEach((l) => l())
-}
+/**
+ * Translate a key to the current locale.
+ * Falls back to English if the key is not found.
+ */
+export function t(key: TranslationKey, params?: Record<string, string | number>): string {
+  let value = translations[currentLocale]?.[key] ?? translations.en[key] ?? key
 
-/** Subscribe to locale changes */
-export function subscribeLocale(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  if (params) {
+    for (const [paramKey, paramValue] of Object.entries(params)) {
+      value = value.replace(`{${paramKey}}`, String(paramValue))
+    }
+  }
+
+  return value
 }
 
 /**
- * Translate a key with optional interpolation params.
- *
- * @example
- * t('vault.breachedFound', { count: 5 }) // "BREACHED — found 5 times!"
+ * Get all available locales.
  */
-export function t(key: TranslationKey, params?: Record<string, string | number>): string {
-  const raw = translations[currentLocale]?.[key] ?? translations.en[key] ?? key
-  if (!params) return raw
-  return raw.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? `{${k}}`))
+export function getAvailableLocales(): { code: Locale; label: string }[] {
+  return [
+    { code: 'en', label: 'English' },
+    { code: 'vi', label: 'Tiếng Việt' },
+  ]
 }
 
-export type { TranslationKey }
+export { en, vi }

@@ -7,15 +7,29 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react'
-import { t as _t, setLocale as _setLocale, getLocale, subscribeLocale, type Locale, type TranslationKey } from '@/lib/i18n'
+import { t as _t, setLocale as _setLocale, getLocale, type Locale, type TranslationKey } from '@/lib/i18n'
+
+// Simple subscription system for locale changes
+type Listener = () => void
+const listeners = new Set<Listener>()
+
+function subscribe(listener: Listener) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function emitChange() {
+  listeners.forEach((l) => l())
+}
 
 /** Set locale and trigger re-renders in all useI18n hooks */
 export function setAppLocale(locale: Locale) {
   _setLocale(locale)
+  emitChange()
 }
 
 export function useI18n() {
-  const locale = useSyncExternalStore(subscribeLocale, getLocale)
+  const locale = useSyncExternalStore(subscribe, getLocale)
 
   const translate = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) => _t(key, params),

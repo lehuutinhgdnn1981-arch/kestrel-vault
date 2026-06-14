@@ -19,8 +19,8 @@
 //! | scanner_run_full_scan      | Unlocked      | Full vulnerability  |
 
 use crate::commands::types::{
-    validate_field, CommandError, CommandResult,
-    PasswordStrengthResponse, SecurityBreakdown, SecurityScoreResponse,
+    validate_field, validate_uuid, CommandError, CommandResult,
+    BreachCheckEntryResponse, PasswordStrengthResponse, SecurityBreakdown, SecurityScoreResponse,
     VulnerabilityItemResponse,
 };
 use crate::crypto::secure_string::SecureString;
@@ -89,8 +89,9 @@ pub fn scanner_password_strength(
 
 /// Checks if credentials appear in known data breaches.
 ///
-/// Uses a local breach database with SHA-256 hashed lookups.
-/// No plaintext passwords or usernames are ever transmitted.
+/// Uses the Have I Been Pwned Password API with k-anonymity.
+/// Only the first 5 characters of the SHA-1 hash are sent —
+/// the full password NEVER leaves the device.
 ///
 /// # IPC Contract
 ///
@@ -98,9 +99,9 @@ pub fn scanner_password_strength(
 ///
 /// # Security
 ///
-/// - Passwords are hashed with SHA-256 before comparison
-/// - The breach database is stored locally
-/// - No network calls are made
+/// - Password is hashed with SHA-1 before lookup
+/// - Only first 5 chars of hash are sent to HIBP (k-anonymity)
+/// - The full password and full hash never leave the device
 #[tauri::command]
 pub fn scanner_check_breach(
     username: String,
@@ -111,9 +112,7 @@ pub fn scanner_check_breach(
 
     validate_field(&username, 256, "Username")?;
 
-    // Check breach status using SHA-256 hashed lookup
-    // Note: Currently checks against a known common passwords list
-    // Future: Will use a full local HIBP-style database
+    // Check breach status using HIBP API with k-anonymity
     let result = breach_check::check_breach_status(&username)
         .map_err(CommandError::from_kestrel)?;
 
@@ -128,6 +127,175 @@ pub fn scanner_check_breach(
     } else {
         Ok(None)
     }
+}
+
+/// Checks if a password string has appeared in known data breaches.
+///
+/// Takes a plaintext password, checks it against the HIBP Password API
+/// using k-anonymity, then discards the plaintext.
+///
+/// This command does NOT need vault decryption — the frontend already
+/// has the revealed password from `vault_reveal_password`. This avoids
+/// crypto errors that can occur when `scanner_check_entry_breach` tries
+/// to decrypt the password again internally.
+///
+/// # IPC Contract
+///
+/// - **Required state**: Any (does not access vault data)
+///
+/// # Security
+///
+/// - Password is hashed with SHA-1, then zeroized
+/// - Only first 5 chars of SHA-1 hash are sent to HIBP (k-anonymity)
+/// - The full password and full hash never leave the device
+#[tauri::command]
+pub fn scanner_check_password_breach(
+    password: String,
+    _state: State<'_, AppState>,
+) -> CommandResult<BreachCheckEntryResponse> {
+    if password.is_empty() {
+        return Err(CommandError::validation(
+            "Password is required for breach check",
+        ));
+    }
+    validate_field(&password, 1024, "Password")?;
+
+    // Check breach status via HIBP API
+    let result = breach_check::check_breach_status(&password)
+        .map_err(CommandError::from_kestrel)?;
+
+    // Zeroize the password from memory
+    let _ = SecureString::from(password);
+
+    tracing::info!(
+        "Password breach check — result: {}",
+        if result.is_breached { "BREACHED" } else { "SAFE" }
+    );
+
+    Ok(BreachCheckEntryResponse {
+        is_breached: result.is_breached,
+        occurrence_count: result.occurrence_count,
+        message: result.message,
+        threat_level: result.threat_level.to_string(),
+    })
+}
+
+/// Checks if a vault entry's password has appeared in known data breaches.
+///
+/// Reveals the entry's password, checks it against the HIBP Password API
+/// using k-anonymity, then discards the plaintext password.
+///
+/// # IPC Contract
+///
+/// - **Required state**: Unlocked
+///
+/// # Security
+///
+/// - Password is revealed in Rust memory, hashed with SHA-1, then zeroized
+/// - Only first 5 chars of SHA-1 hash are sent to HIBP (k-anonymity)
+/// - The full password and full hash never leave the device
+/// - This action is audit-logged
+#[tauri::command]
+pub fn scanner_check_entry_breach(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> CommandResult<BreachCheckEntryResponse> {
+    // Guard: vault must be unlocked
+    state.require_unlocked()?;
+    state.validate_session()?;
+
+    validate_uuid(&entry_id, "entry_id")?;
+
+    let dek = state.get_dek().ok_or_else(|| {
+        tracing::error!("Breach check: DEK not available for entry {}", entry_id);
+        CommandError::unauthorized("Vault is locked — DEK not available")
+    })?;
+    let pool = state.get_db_pool().ok_or_else(|| {
+        tracing::error!("Breach check: DB pool not available for entry {}", entry_id);
+        CommandError::unauthorized("Database not available")
+    })?;
+
+    // Reveal the password for this entry
+    let entry_uuid = uuid::Uuid::parse_str(&entry_id).map_err(|_| {
+        tracing::error!("Breach check: Invalid UUID format: {}", entry_id);
+        CommandError::validation("Invalid entry UUID")
+    })?;
+
+    let service = VaultServiceImpl::new(&dek, &pool);
+
+    // Debug: first verify the DEK can decrypt this entry's URL
+    // (if URL decryption also fails, the DEK is wrong for this entry)
+    let entry = crate::commands::async_runtime::block_on(async {
+        service.get_entry(entry_uuid).await
+    }).map_err(|e| {
+        tracing::error!("Breach check: failed to load entry {}: {:?}", entry_id, e);
+        CommandError::from_kestrel(e)
+    })?;
+    tracing::info!("Breach check: loaded entry {} (has_url={}, enc_pw_len={})",
+        entry_id, entry.has_url(), entry.encrypted_password.len());
+
+    // Test: try decrypting the URL field to verify DEK is correct
+    if !entry.encrypted_url.is_empty() {
+        let crypto = crate::crypto::VaultCryptoService::new_dek(&dek);
+        match crypto.decrypt_field(&entry_id, "url", &entry.encrypted_url) {
+            Ok(_) => tracing::info!("Breach check: URL decryption OK — DEK is valid for this entry"),
+            Err(e) => tracing::error!("Breach check: URL decryption also failed — DEK is WRONG for entry {}: {:?}", entry_id, e),
+        }
+    } else {
+        tracing::info!("Breach check: no URL to test-decrypt for entry {}", entry_id);
+    }
+
+    tracing::info!("Breach check: revealing password for entry {}", entry_id);
+
+    let decrypted = match crate::commands::async_runtime::block_on(async {
+        service.reveal_password(entry_uuid).await
+    }) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("Breach check: reveal_password failed for entry {}: {:?}", entry_id, e);
+            return Err(CommandError::from_kestrel(e));
+        }
+    };
+
+    // Get the password string, then zeroize the decrypted result
+    let password_string = match String::from_utf8(decrypted.plaintext.clone()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Breach check: password is not valid UTF-8 for entry {}: {:?}", entry_id, e);
+            return Err(CommandError::from_kestrel(
+                crate::error::KestrelError::Crypto(format!("Password is not valid UTF-8 for entry {}: {}", entry_id, e))
+            ));
+        }
+    };
+
+    tracing::info!("Breach check: password revealed successfully for entry {}, checking HIBP...", entry_id);
+
+    // Check breach status via HIBP API
+    let result = breach_check::check_breach_status(&password_string)
+        .map_err(CommandError::from_kestrel)?;
+
+    // Audit log the breach check
+    tracing::info!(
+        "Breach check performed for entry: {} — result: {}",
+        entry_id,
+        if result.is_breached { "BREACHED" } else { "SAFE" }
+    );
+
+    // Record activity
+    {
+        let mut sm = state.vault_state_machine.write().unwrap_or_else(|e| {
+            tracing::error!("Vault state machine lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        sm.record_activity();
+    }
+
+    Ok(BreachCheckEntryResponse {
+        is_breached: result.is_breached,
+        occurrence_count: result.occurrence_count,
+        message: result.message,
+        threat_level: result.threat_level.to_string(),
+    })
 }
 
 /// Runs a comprehensive vulnerability scan.

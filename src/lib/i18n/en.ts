@@ -175,6 +175,8 @@ const en = {
   'settings.loading': 'Loading settings...',
   'settings.failedToLoad': 'Failed to load settings',
   'settings.retry': 'Retry',
+
+  // General
   'settings.vault': 'Vault',
   'settings.vaultName': 'Vault Name',
   'settings.myVault': 'My KESTREL Vault',
@@ -193,6 +195,8 @@ const en = {
   'settings.importing': 'Importing...',
   'settings.clearVaultData': 'Clear Vault Data',
   'settings.clearing': 'Clearing...',
+
+  // Security
   'settings.encryption': 'Encryption',
   'settings.algorithm': 'Algorithm',
   'settings.active': 'Active',
@@ -219,6 +223,8 @@ const en = {
   'settings.masterPassword': 'Master Password',
   'settings.lastChanged': 'Last changed',
   'settings.setDuringInit': 'Set during vault initialization',
+
+  // Auto-lock
   'settings.autoLock': 'Auto-lock',
   'settings.lockAfter': 'Lock after',
   'settings.lockAfterDesc': 'Automatically lock the vault after a period of inactivity',
@@ -236,6 +242,8 @@ const en = {
   'settings.30seconds': '30 seconds',
   'settings.1minute': '1 minute',
   'settings.5minutes2': '5 minutes',
+
+  // Backup
   'settings.backupTitle': 'Backup',
   'settings.autoBackups': 'Automatic backups',
   'settings.autoBackupsDesc': 'Create encrypted backups on a schedule',
@@ -249,6 +257,8 @@ const en = {
   'settings.noBackupYet': 'No backup yet',
   'settings.backupNow': 'Backup Now',
   'settings.creatingBackup': 'Creating backup...',
+
+  // Advanced
   'settings.advancedTitle': 'Advanced',
   'settings.debugMode': 'Debug mode',
   'settings.debugModeDesc': 'Enable verbose logging for troubleshooting',
@@ -256,6 +266,8 @@ const en = {
   'settings.resetAllDesc': 'Restore default settings (does not delete data)',
   'settings.reset': 'Reset',
   'settings.version': 'Version',
+
+  // Change Password Dialog
   'settings.changeMasterPassword': 'Change Master Password',
   'settings.currentPassword': 'Current Password',
   'settings.newPassword': 'New Password',

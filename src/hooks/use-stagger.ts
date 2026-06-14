@@ -1,22 +1,41 @@
 /**
- * Stagger animation hook.
+ * useStaggerAnimation hook.
  *
- * Returns an inline style with animation-delay based on the item's index.
- * Used for lists that should animate in one-by-one.
+ * Returns a CSS animation delay string for staggered list/item animations.
+ * Each item fades in slightly after the previous one.
+ *
+ * @param index - The item's position in the list
+ * @param baseDelay - Base delay in ms (default: 50)
+ * @param maxDelay - Maximum total stagger delay in ms (default: 500)
+ * @returns CSS delay string like "50ms", "100ms", etc.
  *
  * Usage:
- *   import { staggerStyle } from '@/hooks/use-stagger'
- *   <div style={staggerStyle(0)}>Item 1</div>
- *   <div style={staggerStyle(1)}>Item 2</div>
- *   <div style={staggerStyle(2)}>Item 3</div>
+ * ```tsx
+ * const delay = useStaggerAnimation(index)
+ * <div style={{ animationDelay: delay }} className="animate-stagger-in">
+ *   {item}
+ * </div>
+ * ```
  */
 
-const STAGGER_DELAY = 40 // ms between each item
-const MAX_STAGGER = 20   // cap at 20 items to avoid long delays
+import { useMemo } from 'react'
 
-export function staggerStyle(index: number): React.CSSProperties {
-  const delay = Math.min(index, MAX_STAGGER) * STAGGER_DELAY
+export function useStaggerDelay(index: number, baseDelay = 50, maxDelay = 500): string {
+  return useMemo(() => {
+    const delay = Math.min(index * baseDelay, maxDelay)
+    return `${delay}ms`
+  }, [index, baseDelay, maxDelay])
+}
+
+/**
+ * Generates inline styles for stagger animation.
+ * Includes opacity: 0 initially so items are hidden before animation starts.
+ */
+export function staggerStyle(index: number, baseDelay = 50, maxDelay = 500): React.CSSProperties {
+  const delay = Math.min(index * baseDelay, maxDelay)
   return {
     animationDelay: `${delay}ms`,
+    animationFillMode: 'both',
+    opacity: 0, // hidden until animation starts
   }
 }

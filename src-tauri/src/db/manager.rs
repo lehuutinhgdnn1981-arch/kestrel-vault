@@ -224,6 +224,106 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Creates a new vault database without SQLCipher encryption.
+    ///
+    /// Since all sensitive data is encrypted at the application level
+    /// with AES-256-GCM, the database file itself doesn't need
+    /// SQLCipher encryption. This avoids the dependency on the
+    /// SQLCipher native library.
+    pub async fn create_vault_plain(&self) -> KestrelResult<()> {
+        // Check if the database file already exists
+        if self.path.exists() {
+            return Err(KestrelError::Database(
+                "Vault database file already exists — use open_vault_plain() instead".to_string(),
+            ));
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = self.path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    KestrelError::Io(format!(
+                        "Failed to create database directory '{}': {e}",
+                        parent.display()
+                    ))
+                })?;
+            }
+        }
+
+        let config = DatabaseConfig::default();
+
+        // Create the plain (non-SQLCipher) connection
+        let db_conn = DbConnection::new_plain(&self.path, &config).await?;
+
+        // Run migrations to create the schema
+        let pool = db_conn.pool();
+        migrations::run_migrations(pool).await?;
+        migrations::verify_migration_integrity(pool).await?;
+
+        // Store the connection
+        {
+            let mut conn_guard = self.connection.write();
+            *conn_guard = Some(db_conn);
+        }
+        {
+            let mut state_guard = self.state.write();
+            *state_guard = VaultDbState::Open;
+        }
+
+        tracing::info!(
+            "Created new vault database (plain) at {}",
+            self.path.display()
+        );
+
+        Ok(())
+    }
+
+    /// Opens an existing vault database without SQLCipher encryption.
+    ///
+    /// Since all sensitive data is encrypted at the application level
+    /// with AES-256-GCM, the database file itself doesn't need
+    /// SQLCipher encryption.
+    pub async fn open_vault_plain(&self) -> KestrelResult<()> {
+        // Check if the database file exists
+        if !self.path.exists() {
+            return Err(KestrelError::Database(
+                "Vault database file does not exist — use create_vault_plain() first".to_string(),
+            ));
+        }
+
+        // Check if already open
+        if self.state() == VaultDbState::Open {
+            return Ok(()); // Already open — idempotent
+        }
+
+        let config = DatabaseConfig::default();
+
+        // Open the plain (non-SQLCipher) connection
+        let db_conn = DbConnection::new_plain(&self.path, &config).await?;
+
+        // Run any pending migrations
+        let pool = db_conn.pool();
+        migrations::run_migrations(pool).await?;
+        migrations::verify_migration_integrity(pool).await?;
+
+        // Store the connection
+        {
+            let mut conn_guard = self.connection.write();
+            *conn_guard = Some(db_conn);
+        }
+        {
+            let mut state_guard = self.state.write();
+            *state_guard = VaultDbState::Open;
+        }
+
+        tracing::info!(
+            "Opened vault database (plain) at {}",
+            self.path.display()
+        );
+
+        Ok(())
+    }
+
     /// Opens an existing encrypted vault database.
     ///
     /// This operation:

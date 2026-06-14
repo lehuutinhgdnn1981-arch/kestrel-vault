@@ -105,6 +105,12 @@ pub struct AppState {
     pub session: RwLock<Option<Session>>,
     /// Application configuration (auto-lock timeout, etc.).
     pub config: RwLock<AppConfig>,
+    /// The application data directory for storing encrypted files.
+    /// Set during app startup via `set_app_data_dir`.
+    pub app_data_dir: RwLock<Option<std::path::PathBuf>>,
+    /// The vault database file path.
+    /// Set during app startup via `init_db_manager`.
+    pub vault_db_path: RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Default for AppState {
@@ -122,6 +128,8 @@ impl Default for AppState {
             kdf_params: RwLock::new(None),
             session: RwLock::new(None),
             config: RwLock::new(AppConfig::default()),
+            app_data_dir: RwLock::new(None),
+            vault_db_path: RwLock::new(None),
         }
     }
 }
@@ -256,18 +264,125 @@ impl AppState {
         }
     }
 
+    /// Sets the application data directory.
+    ///
+    /// Called during app startup to store the path for encrypted file storage.
+    pub fn set_app_data_dir(&self, path: std::path::PathBuf) {
+        let mut guard = self.app_data_dir.write().unwrap_or_else(|e| {
+            tracing::error!("App data dir lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        *guard = Some(path);
+    }
+
+    /// Returns the application data directory if set.
+    ///
+    /// Used by file commands to locate the encrypted file storage.
+    pub fn get_app_data_dir(&self) -> Option<std::path::PathBuf> {
+        let guard = self.app_data_dir.read().unwrap_or_else(|e| {
+            tracing::error!("App data dir lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone()
+    }
+
     /// Initializes the database manager with the given vault path.
     ///
     /// This should be called during app startup or when the vault
     /// file location is determined. It does NOT open the database —
     /// that happens during unlock.
     pub fn init_db_manager(&self, vault_path: &std::path::Path) {
+        // Also store the db path for backup operations
+        {
+            let mut path_guard = self.vault_db_path.write().unwrap_or_else(|e| {
+                tracing::error!("DB path lock poisoned: {}", e);
+                std::process::exit(1);
+            });
+            *path_guard = Some(vault_path.to_path_buf());
+        }
+
         let mut guard = self.db_manager.write().unwrap_or_else(|e| {
             tracing::error!("DB manager lock poisoned: {}", e);
             std::process::exit(1);
         });
         *guard = Some(std::sync::Arc::new(DatabaseManager::new(vault_path)));
         tracing::info!("Database manager initialized for: {}", vault_path.display());
+    }
+
+    /// Creates and opens a new vault database (without SQLCipher).
+    ///
+    /// Called during vault initialization to create the database file,
+    /// run migrations, and open the connection pool.
+    pub fn create_database(&self) -> Result<(), CommandError> {
+        let manager = self.get_db_manager().ok_or_else(|| {
+            CommandError::from_kestrel(KestrelError::Database(
+                "Database manager not initialized".to_string(),
+            ))
+        })?;
+        crate::commands::async_runtime::block_on(async {
+            manager.create_vault_plain().await
+        }).map_err(CommandError::from_kestrel)?;
+        tracing::info!("Vault database created and opened");
+        Ok(())
+    }
+
+    /// Opens an existing vault database (without SQLCipher).
+    ///
+    /// Called during vault unlock to open the database connection pool.
+    /// If the database is already open, this is a no-op.
+    /// If the database file doesn't exist, creates it (first unlock after init).
+    pub fn open_database(&self) -> Result<(), CommandError> {
+        let manager = self.get_db_manager().ok_or_else(|| {
+            CommandError::from_kestrel(KestrelError::Database(
+                "Database manager not initialized".to_string(),
+            ))
+        })?;
+        // Try open first; if DB file doesn't exist, create it
+        let result = crate::commands::async_runtime::block_on(async {
+            manager.open_vault_plain().await
+        });
+        match result {
+            Ok(()) => {
+                tracing::info!("Vault database opened");
+                Ok(())
+            }
+            Err(_) => {
+                // DB file might not exist yet — try creating it
+                tracing::info!("Database not found, creating new vault database");
+                crate::commands::async_runtime::block_on(async {
+                    manager.create_vault_plain().await
+                }).map_err(CommandError::from_kestrel)?;
+                tracing::info!("Vault database created and opened");
+                Ok(())
+            }
+        }
+    }
+
+    /// Closes the vault database connection pool.
+    ///
+    /// Called during vault lock to release all database resources.
+    pub fn close_database(&self) -> Result<(), CommandError> {
+        let manager = self.get_db_manager().ok_or_else(|| {
+            CommandError::from_kestrel(KestrelError::Database(
+                "Database manager not initialized".to_string(),
+            ))
+        })?;
+        crate::commands::async_runtime::block_on(async {
+            manager.close_vault().await
+        }).map_err(CommandError::from_kestrel)?;
+        tracing::info!("Vault database closed");
+        Ok(())
+    }
+
+    /// Returns the vault database file path if set.
+    ///
+    /// Used by backup operations to locate the database file.
+    pub fn get_db_path(&self) -> Option<std::path::PathBuf> {
+        let guard = self.vault_db_path.read().unwrap_or_else(|e| {
+            tracing::error!("DB path lock poisoned: {}", e);
+            std::process::exit(1);
+        });
+        guard.clone()
     }
 
     /// Validates the current session and checks for auto-lock.
@@ -422,7 +537,7 @@ impl AppState {
     ///
     /// This updates the in-memory salt, test envelope, wrapped DEK,
     /// and KDF params so that unlock can work without querying the database.
-    fn store_vault_meta_in_memory(
+    pub fn store_vault_meta_in_memory(
         &self,
         salt_hex: String,
         test_envelope: Vec<u8>,
@@ -569,6 +684,34 @@ pub fn auth_initialize_vault(
         init_result.kdf_params.clone(),
     );
 
+    // ── Create and open the vault database ──
+    // This creates the SQLite database file, runs migrations,
+    // and opens the connection pool so all vault operations work.
+    state.create_database()?;
+
+    // ── Persist vault metadata to database ──
+    // Store the salt, KDF params, test envelope, and wrapped DEK
+    // so the vault can be unlocked after app restart.
+    {
+        let pool = state.get_db_pool().ok_or_else(|| {
+            CommandError::unauthorized("Database not available after creation")
+        })?;
+        crate::commands::async_runtime::block_on(async {
+            crate::db::vault_meta_repo::VaultMetaRepo::initialize(
+                &pool,
+                salt_hex.clone(),
+                ITERATIONS,
+                MEMORY_COST,
+                PARALLELISM,
+                1, // kdf_version
+                init_result.test_envelope_bytes.clone(),
+                init_result.wrapped_dek.envelope_bytes.clone(),
+                hint,
+            ).await
+        }).map_err(CommandError::from_kestrel)?;
+        tracing::info!("Vault metadata persisted to database");
+    }
+
     // ── Store master key in AppState (vault is now Locked, NOT Unlocked) ──
     // After initialization, the vault goes to Locked state.
     // The master key is NOT stored — the user must explicitly unlock.
@@ -586,7 +729,24 @@ pub fn auth_initialize_vault(
     //   test_envelope: test_envelope_bytes,
     //   hint: hint,
     // }
-    // TODO: Audit log: VaultInitialized
+    // ── Audit log: VaultInitialized ──
+    {
+        if let Some(pool) = state.get_db_pool() {
+            let _ = crate::commands::async_runtime::block_on(async {
+                crate::db::audit_event_repo::AuditEventRepo::create(&pool, crate::db::audit_event_repo::CreateAuditEventRequest {
+                    category: "Auth".to_string(),
+                    action: "VaultInitialized".to_string(),
+                    subject: "system".to_string(),
+                    metadata_json: Some(serde_json::json!({
+                        "kdf_version": 1,
+                        "memory_cost_kib": MEMORY_COST,
+                        "iterations": ITERATIONS,
+                        "parallelism": PARALLELISM,
+                    }).to_string()),
+                }).await
+            });
+        }
+    }
 
     tracing::info!(
         "Vault initialized with Argon2id (memory={}KiB, iterations={}, parallelism={})",
@@ -733,6 +893,13 @@ pub fn auth_unlock(
                 config.auto_lock_minutes
             };
 
+            // ── Open the vault database BEFORE transitioning state ──
+            // This ensures that if the DB fails to open, the vault stays
+            // in Locked state and the user gets a clear error. Previously
+            // this was called AFTER the state transition, which could leave
+            // the vault in an inconsistent Unlocked state with no DB.
+            state.open_database()?;
+
             // Transition: Locked → Unlocked
             let session_id: SessionId;
             let expires_at: chrono::DateTime<chrono::Utc>;
@@ -754,6 +921,8 @@ pub fn auth_unlock(
                         }
                     }
                     Err(e) => {
+                        // Rollback: close the DB since state transition failed
+                        let _ = state.close_database();
                         return Err(CommandError::from_kestrel(e));
                     }
                 }
@@ -794,7 +963,18 @@ pub fn auth_unlock(
                 *dek_guard = Some(dek);
             }
 
-            // TODO: Audit log: UnlockSucceeded
+            // ── Audit log: UnlockSucceeded ──
+            if let Some(pool) = state.get_db_pool() {
+                let sid = session_id.to_string();
+                let _ = crate::commands::async_runtime::block_on(async {
+                    crate::db::audit_event_repo::AuditEventRepo::create(&pool, crate::db::audit_event_repo::CreateAuditEventRequest {
+                        category: "Auth".to_string(),
+                        action: "UnlockSucceeded".to_string(),
+                        subject: sid,
+                        metadata_json: None,
+                    }).await
+                });
+            }
 
             Ok(SessionResponse {
                 session_id: session_id.to_string(),
@@ -825,7 +1005,36 @@ pub fn auth_unlock(
 
             tracing::warn!("Failed unlock attempt: {}", msg);
 
-            // TODO: Audit log: UnlockFailed
+            // ── Audit log: UnlockFailed ──
+            // Try to open the DB temporarily to write the audit event.
+            // If the DB can't be opened, log to tracing only (fail-open).
+            {
+                let audit_result = {
+                    let pool = state.get_db_pool();
+                    if pool.is_none() {
+                        // DB not open — try opening temporarily
+                        if state.open_database().is_ok() {
+                            state.get_db_pool()
+                        } else {
+                            None
+                        }
+                    } else {
+                        pool
+                    }
+                };
+                if let Some(pool) = audit_result {
+                    let _ = crate::commands::async_runtime::block_on(async {
+                        crate::db::audit_event_repo::AuditEventRepo::create(&pool, crate::db::audit_event_repo::CreateAuditEventRequest {
+                            category: "Auth".to_string(),
+                            action: "UnlockFailed".to_string(),
+                            subject: "system".to_string(),
+                            metadata_json: Some(serde_json::json!({
+                                "reason": msg,
+                            }).to_string()),
+                        }).await
+                    });
+                }
+            }
 
             Err(CommandError::unauthorized(
                 "Incorrect master password",
@@ -922,7 +1131,27 @@ pub fn auth_lock(state: State<'_, AppState>) -> CommandResult<VaultLockResponse>
         limiter.reset_operation(Operation::Login);
     }
 
-    // TODO: Audit log: VaultLocked
+    // ── Audit log: VaultLocked ──
+    // Write the audit event BEFORE closing the database so the pool is still available.
+    {
+        if let Some(pool) = state.get_db_pool() {
+            let _ = crate::commands::async_runtime::block_on(async {
+                crate::db::audit_event_repo::AuditEventRepo::create(&pool, crate::db::audit_event_repo::CreateAuditEventRequest {
+                    category: "Auth".to_string(),
+                    action: "VaultLocked".to_string(),
+                    subject: "user".to_string(),
+                    metadata_json: None,
+                }).await
+            });
+        }
+    }
+
+    // ── Close the vault database ──
+    // Release all database connections when the vault is locked.
+    // The database will be reopened on the next unlock.
+    {
+        let _ = state.close_database();
+    }
 
     tracing::info!("Vault locked — KEK and DEK zeroized, session destroyed");
 

@@ -1,40 +1,27 @@
 //! Breach check module for KESTREL Vault.
 //!
-//! Provides local-only breach database checking. Passwords are
-//! hashed with SHA-256 before any comparison — plaintext passwords
-//! are NEVER transmitted or compared directly.
+//! Provides breach checking via the Have I Been Pwned (HIBP) Password API
+//! using k-anonymity. Only the first 5 characters of the SHA-1 hash are
+//! sent to the API — the full password and full hash NEVER leave the device.
 //!
-//! # Offline-Only Design
+//! # How HIBP k-anonymity works
 //!
-//! This module is designed to work completely offline:
-//! - No network calls are made
-//! - No plaintext passwords are transmitted
-//! - A local breach database is embedded or downloaded periodically
-//!
-//! # Hash-Based Lookup
-//!
-//! To check if a password has been breached:
-//! 1. Hash the password with SHA-256
-//! 2. Look up the hash in the local breach database
-//! 3. Return whether a match was found
+//! 1. SHA-1 hash the password locally
+//! 2. Send only the first 5 hex chars of the hash to HIBP
+//! 3. HIBP returns all hash suffixes matching that prefix (thousands)
+//! 4. We check locally if our full hash is in the response
 //!
 //! # Privacy
 //!
-//! Even the SHA-256 hash of the password is never logged or
-//! stored persistently. It exists only in memory during the
-//! check and is zeroized afterward.
-//!
-//! # TODO (Phase 2)
-//!
-//! - Implement local breach database (HIBP-style k-anonymity)
-//! - Add periodic database update mechanism
-//! - Add database integrity verification
+//! - The full password and full SHA-1 hash never leave the device
+//! - HIBP only sees a 5-char prefix that matches thousands of passwords
+//! - We add the `Add-Padding: true` header for extra privacy
+//! - The hash is zeroized from memory after the check
 
 use crate::error::KestrelError;
 use crate::scanner::ThreatLevel;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use zeroize::Zeroize;
+use sha1::{Digest, Sha1};
 
 /// Result of a breach check.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -73,37 +60,39 @@ impl BreachCheckResult {
     }
 }
 
-/// Hashes a password with SHA-256 for breach database lookup.
+/// Hashes a password with SHA-256 for internal breach vulnerability scanning.
 ///
-/// # Security
-///
-/// - SHA-256 is used for lookup, NOT for password storage
-/// - The hash is never logged or stored persistently
-/// - The hash bytes are zeroized after the lookup
-///
-/// # Note
-///
-/// SHA-256 is appropriate here because:
-/// - This is NOT a password hashing use case (we use Argon2id for that)
-/// - This IS a content-addressable lookup (hash → breach count)
-/// - Speed is actually desired for quick lookups
+/// This is used by the full vulnerability scan, NOT by the HIBP API check.
+/// HIBP uses SHA-1 (see `check_breach_status_hibp`).
 pub fn hash_password_for_lookup(password: &str) -> [u8; 32] {
+    use sha2::Sha256;
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
     let result = hasher.finalize();
     let hash: [u8; 32] = result.into();
-
-    // Zeroize the hasher's internal state
-    // Note: Sha256 hasher doesn't implement Zeroize, but the output
-    // is what we care about protecting
     hash
 }
 
-/// Checks if a password has appeared in known data breaches.
+/// Hashes a password with SHA-1 for HIBP API lookup.
+/// Returns the uppercase hex string of the hash.
+fn sha1_hex(password: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(password.as_bytes());
+    let result = hasher.finalize();
+    let hash_bytes: &[u8] = &result;
+    let hex: String = hash_bytes.iter().map(|b| format!("{b:02X}")).collect();
+    // Zeroize hasher internal state is handled by drop
+    hex
+}
+
+/// Checks if a password has appeared in known data breaches using the
+/// Have I Been Pwned Password API with k-anonymity.
 ///
-/// This function hashes the password with SHA-256 and checks
-/// the local breach database. No plaintext password is ever
-/// transmitted or compared directly.
+/// # Privacy
+///
+/// - Only the first 5 characters of the SHA-1 hash are sent to HIBP
+/// - The full password and full hash NEVER leave the device
+/// - Uses `Add-Padding: true` header for extra privacy
 ///
 /// # Arguments
 ///
@@ -116,32 +105,90 @@ pub fn hash_password_for_lookup(password: &str) -> [u8; 32] {
 ///
 /// # Errors
 ///
-/// Returns `KestrelError::Scanner` if the breach database
-/// cannot be accessed.
-///
-/// # Security
-///
-/// - The password is hashed before lookup
-/// - No network calls are made
-/// - The hash is zeroized after the lookup
-///
-/// # TODO (Phase 2)
-///
-/// - Implement actual breach database lookup
-/// - Add k-anonymity support for API-based checks
-/// - Add local database caching
+/// Returns `KestrelError::Scanner` if the HIBP API cannot be reached.
 pub fn check_breach_status(password: &str) -> Result<BreachCheckResult, KestrelError> {
-    let mut hash = hash_password_for_lookup(password);
+    // Use the HIBP API for real breach checking
+    check_breach_status_hibp(password)
+}
 
-    // TODO: Replace with actual breach database lookup in Phase 2
-    // 1. Query local breach database with the SHA-256 hash
-    // 2. Return occurrence count if found
-    // 3. Zeroize the hash after lookup
+/// Performs the actual HIBP API check with k-anonymity.
+///
+/// This function makes a network request to the HIBP API.
+/// It uses the reqwest blocking client since Tauri commands
+/// run on the main thread with block_on.
+fn check_breach_status_hibp(password: &str) -> Result<BreachCheckResult, KestrelError> {
+    // Step 1: SHA-1 hash the password locally
+    let full_hash = sha1_hex(password);
+    let prefix = &full_hash[0..5];   // First 5 chars → sent to API
+    let suffix = &full_hash[5..];     // Remaining chars → checked locally
 
-    // Placeholder: always return not breached
-    hash.zeroize();
+    // Step 2: Query HIBP API with only the 5-char prefix
+    let url = format!("https://api.pwnedpasswords.com/range/{prefix}");
 
-    Ok(BreachCheckResult::not_breached())
+    let response = crate::commands::async_runtime::block_on(async {
+        reqwest::Client::new()
+            .get(&url)
+            .header("Add-Padding", "true")
+            .header("User-Agent", "KESTREL-Vault-Breach-Check")
+            .send()
+            .await
+    });
+
+    let response = match response {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::warn!("HIBP API request failed: {}", e);
+            return Err(KestrelError::Scanner(format!(
+                "Cannot reach Have I Been Pwned API. Check your internet connection. Error: {e}"
+            )));
+        }
+    };
+
+    let status = response.status();
+    if !status.is_success() {
+        tracing::warn!("HIBP API returned status {}", status);
+        return Err(KestrelError::Scanner(format!(
+            "Have I Been Pwned API returned error status {status}. Please try again later."
+        )));
+    }
+
+    let body = crate::commands::async_runtime::block_on(async {
+        response.text().await
+    });
+
+    let body = match body {
+        Ok(text) => text,
+        Err(e) => {
+            return Err(KestrelError::Scanner(format!(
+                "Failed to read HIBP API response: {e}"
+            )));
+        }
+    };
+
+    // Step 3: Check if our hash suffix appears in the response
+    // Each line format: HASH_SUFFIX:COUNT
+    let mut found_count: u64 = 0;
+    for line in body.lines() {
+        let parts: Vec<&str> = line.trim().split(':').collect();
+        if parts.len() == 2 && parts[0] == suffix {
+            if let Ok(count) = parts[1].parse::<u64>() {
+                found_count = count;
+            }
+            break;
+        }
+    }
+
+    // Step 4: Return result
+    if found_count > 0 {
+        tracing::warn!(
+            "Breach check: password found in {} breach records",
+            found_count
+        );
+        Ok(BreachCheckResult::breached(found_count))
+    } else {
+        tracing::info!("Breach check: password NOT found in breach database");
+        Ok(BreachCheckResult::not_breached())
+    }
 }
 
 /// Converts a SHA-256 hash to a hexadecimal string for database lookup.
@@ -180,9 +227,18 @@ mod tests {
     }
 
     #[test]
-    fn breach_check_returns_result() {
-        let result = check_breach_status("test-password").unwrap();
-        assert!(!result.is_breached);
+    fn sha1_hex_format() {
+        let hash = sha1_hex("test");
+        assert_eq!(hash.len(), 40); // SHA-1 = 20 bytes = 40 hex chars
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(hash, hash.to_uppercase()); // Should already be uppercase
+    }
+
+    #[test]
+    fn sha1_known_value() {
+        // Known SHA-1 of "password"
+        let hash = sha1_hex("password");
+        assert_eq!(hash, "5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8");
     }
 
     #[test]

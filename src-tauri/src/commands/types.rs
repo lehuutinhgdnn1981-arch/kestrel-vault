@@ -82,7 +82,7 @@ impl CommandError {
     /// Maps internal errors to user-safe messages.
     pub fn from_kestrel(err: KestrelError) -> Self {
         let (code, message) = match &err {
-            KestrelError::Crypto(_) => ("CRYPTO_ERROR", "A cryptographic operation failed"),
+            KestrelError::Crypto(msg) => ("CRYPTO_ERROR", msg.as_str()),
             KestrelError::Database(_) => ("DATABASE_ERROR", "A database operation failed"),
             KestrelError::Vault(_) => ("VAULT_ERROR", "A vault operation failed"),
             KestrelError::Audit(_) => ("AUDIT_ERROR", "An audit operation failed"),
@@ -183,6 +183,19 @@ pub struct VulnerabilityItemResponse {
     pub entry_id: Option<String>,
 }
 
+/// Response for entry-specific breach check (HIBP Password API).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreachCheckEntryResponse {
+    /// Whether the password was found in the HIBP breach database.
+    pub is_breached: bool,
+    /// Number of times the password appeared in breaches.
+    pub occurrence_count: u64,
+    /// Human-readable message about the result.
+    pub message: String,
+    /// Threat level string (e.g., "critical", "none").
+    pub threat_level: String,
+}
+
 /// Audit event response for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEventResponse {
@@ -208,6 +221,14 @@ pub struct AppSettingsResponse {
     pub theme: String,
     pub language: String,
     pub clear_clipboard_seconds: u32,
+    pub lock_on_sleep: bool,
+    pub lock_on_blur: bool,
+    pub auto_backup: bool,
+    pub backup_frequency: String,
+    pub backup_location: String,
+    pub debug_mode: bool,
+    pub max_login_attempts: u32,
+    pub lockout_duration_seconds: u32,
 }
 
 // ─── Vault State Responses ────────────────────────────────────────

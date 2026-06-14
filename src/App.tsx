@@ -1,8 +1,12 @@
 import React, { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/auth-store";
+import { useAppStore } from "@/stores/app-store";
 import { useAutoLock } from "@/hooks/use-auto-lock";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcut";
+import { ToastContainer } from "@/components/ui/toast";
+import { settingsCommands } from "@/lib/tauri";
+import { setLocale, type Locale } from "@/lib/i18n";
 import Layout from "@/pages/Layout";
 import UnlockScreen from "@/pages/UnlockScreen";
 import Dashboard from "@/pages/Dashboard";
@@ -17,10 +21,26 @@ import Settings from "@/pages/Settings";
 export const App: React.FC = () => {
   const appState = useAuthStore((s) => s.appState);
   const initialize = useAuthStore((s) => s.initialize);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
 
+  // Initialize auth and apply saved theme on mount
   useEffect(() => {
     initialize();
-  }, [initialize]);
+    // Apply the persisted theme on startup
+    setTheme(theme);
+
+    // Load saved language from backend settings and apply
+    settingsCommands.getSettings().then((settings) => {
+      if (settings.language) {
+        const locale = settings.language as Locale;
+        setLocale(locale);
+        useAppStore.getState().setLanguage(locale);
+      }
+    }).catch(() => {
+      // Silently fail — defaults to English
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useAutoLock();
   useKeyboardShortcuts();
@@ -52,19 +72,22 @@ export const App: React.FC = () => {
   }
 
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/vault" element={<PasswordVault />} />
-        <Route path="/files" element={<FileVault />} />
-        <Route path="/notes" element={<SecureNotes />} />
-        <Route path="/security" element={<SecurityCenter />} />
-        <Route path="/scanner" element={<ThreatScanner />} />
-        <Route path="/audit" element={<AuditLogs />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Layout>
+    <>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/vault" element={<PasswordVault />} />
+          <Route path="/files" element={<FileVault />} />
+          <Route path="/notes" element={<SecureNotes />} />
+          <Route path="/security" element={<SecurityCenter />} />
+          <Route path="/scanner" element={<ThreatScanner />} />
+          <Route path="/audit" element={<AuditLogs />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Layout>
+      <ToastContainer />
+    </>
   );
 };

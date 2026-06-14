@@ -9,6 +9,13 @@
 //!   (security visibility should not require unlock)
 //! - Export operations are rate-limited and audit-logged
 //! - No sensitive data (passwords, keys) in audit events
+//!
+//! # Database Availability
+//!
+//! Audit queries work even when the vault is locked. When the DB pool
+//! is not available (vault locked), we temporarily open the database
+//! in plain mode, perform the read, then close it again. This ensures
+//! audit visibility is always available without requiring unlock.
 
 use crate::commands::types::{
     validate_field, AuditEventResponse, AuditPageResponse, CommandError, CommandResult,
@@ -18,9 +25,36 @@ use tauri::State;
 
 use super::auth_commands::AppState;
 
+/// Helper to obtain a DB pool for read-only audit queries.
+///
+/// If the pool is already available (vault unlocked), returns it directly.
+/// If not (vault locked), temporarily opens the database, returns the pool,
+/// and signals that the DB should be closed after use.
+///
+/// Returns `(pool, should_close)` where `should_close` indicates whether
+/// the caller should close the DB after finishing the read.
+fn get_audit_pool(state: &AppState) -> (Option<sqlx::SqlitePool>, bool) {
+    // First try: pool already available (vault is unlocked)
+    if let Some(pool) = state.get_db_pool() {
+        return (Some(pool), false);
+    }
+
+    // Second try: temporarily open the database for read-only access
+    // This allows audit queries to work even when the vault is locked
+    if state.open_database().is_ok() {
+        if let Some(pool) = state.get_db_pool() {
+            return (Some(pool), true);
+        }
+    }
+
+    (None, false)
+}
+
 /// Queries audit events with filtering and pagination.
 ///
 /// Available in any vault state for security visibility.
+/// When the vault is locked, the database is temporarily opened
+/// for the query and closed afterwards.
 ///
 /// # Arguments
 ///
@@ -47,9 +81,9 @@ pub fn audit_query_events(
     // Audit queries are available in any state (security visibility)
     // No state guard required — audit logs don't contain secrets
 
-    // Get database pool
-    let pool = state.get_db_pool();
-    match pool {
+    let (pool, should_close) = get_audit_pool(&state);
+
+    let result = match pool {
         Some(p) => {
             let rows = crate::commands::async_runtime::block_on(async {
                 match &category {
@@ -115,15 +149,21 @@ pub fn audit_query_events(
             }
         }
         None => {
-            // Database not available — return empty results
-            // This happens when vault hasn't been unlocked yet
+            // Database not available — vault may not be initialized yet
             Ok(AuditPageResponse {
                 events: Vec::new(),
                 total_count: 0,
                 has_more: false,
             })
         }
+    };
+
+    // Close the DB if we opened it temporarily
+    if should_close {
+        let _ = state.close_database();
     }
+
+    result
 }
 
 /// Exports audit events to a file.
@@ -149,9 +189,9 @@ pub fn audit_export_events(
         ));
     }
 
-    // Get database pool
-    let pool = state.get_db_pool();
-    match pool {
+    let (pool, should_close) = get_audit_pool(&state);
+
+    let result = match pool {
         Some(p) => {
             // Load all audit events (with optional time filter)
             let all_events = crate::commands::async_runtime::block_on(async {
@@ -206,7 +246,7 @@ pub fn audit_export_events(
                         _ => unreachable!(),
                     };
 
-                    // Audit log the export itself
+                    // Audit log the export itself (only if pool is still available)
                     if let Some(p) = state.get_db_pool() {
                         let _ = crate::commands::async_runtime::block_on(async {
                             AuditEventRepo::create(&p, crate::db::audit_event_repo::CreateAuditEventRequest {
@@ -232,8 +272,15 @@ pub fn audit_export_events(
         }
         None => {
             Err(CommandError::unauthorized(
-                "Database not available — unlock the vault first",
+                "Database not available — vault may not be initialized",
             ))
         }
+    };
+
+    // Close the DB if we opened it temporarily
+    if should_close {
+        let _ = state.close_database();
     }
+
+    result
 }

@@ -59,6 +59,9 @@ pub struct SecureNoteRow {
 /// before calling the repository.
 #[derive(Debug, Clone)]
 pub struct CreateSecureNoteRequest {
+    /// Pre-generated note ID (UUID v4).
+    /// Must be generated BEFORE encryption as it is the AAD context.
+    pub id: Option<String>,
     /// Encrypted title (already encrypted).
     pub encrypted_title: Vec<u8>,
     /// Encrypted content (already encrypted).
@@ -95,7 +98,7 @@ impl SecureNoteRepo {
         pool: &SqlitePool,
         request: CreateSecureNoteRequest,
     ) -> KestrelResult<SecureNoteRow> {
-        let id = Uuid::new_v4().to_string();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
@@ -203,6 +206,18 @@ impl SecureNoteRepo {
         Ok(())
     }
 
+    /// Deletes ALL secure notes.
+    ///
+    /// Use with extreme caution — this is irreversible.
+    pub async fn delete_all(pool: &SqlitePool) -> KestrelResult<u64> {
+        let result = sqlx::query("DELETE FROM secure_notes")
+            .execute(pool)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to delete all notes: {e}")))?;
+
+        Ok(result.rows_affected())
+    }
+
     /// Lists secure notes by folder.
     pub async fn list_by_folder(
         pool: &SqlitePool,
@@ -269,6 +284,7 @@ mod tests {
     #[test]
     fn create_note_request_builds() {
         let req = CreateSecureNoteRequest {
+            id: None,
             encrypted_title: vec![1, 2, 3],
             encrypted_content: vec![4, 5, 6],
             nonce: vec![7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],

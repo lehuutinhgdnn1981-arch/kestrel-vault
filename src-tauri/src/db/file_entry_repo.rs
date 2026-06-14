@@ -63,6 +63,12 @@ pub struct FileEntryRow {
 /// before calling the repository.
 #[derive(Debug, Clone)]
 pub struct CreateFileEntryRequest {
+    /// Pre-generated file entry ID (UUID v4).
+    /// The ID must be generated BEFORE encryption because it is
+    /// used as the AAD context for metadata encryption.
+    /// If None, the repo will generate one (but this will cause
+    /// decryption failures if metadata was encrypted with a different ID).
+    pub id: Option<String>,
     /// Encrypted filename (already encrypted).
     pub encrypted_filename: Vec<u8>,
     /// Encrypted on-disk path (already encrypted).
@@ -93,11 +99,16 @@ pub struct FileEntryRepo;
 
 impl FileEntryRepo {
     /// Creates a new file entry.
+    ///
+    /// The file entry ID should be pre-generated and passed in the request
+    /// so that it matches the AAD context used during metadata encryption.
+    /// If no ID is provided, a new one is generated (but this will cause
+    /// decryption failures if metadata was encrypted with a different ID).
     pub async fn create(
         pool: &SqlitePool,
         request: CreateFileEntryRequest,
     ) -> KestrelResult<FileEntryRow> {
-        let id = Uuid::new_v4().to_string();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
@@ -208,6 +219,19 @@ impl FileEntryRepo {
         Ok(())
     }
 
+    /// Deletes ALL file entries.
+    ///
+    /// Use with extreme caution — this is irreversible.
+    /// Note: The actual encrypted files on disk must be deleted separately.
+    pub async fn delete_all(pool: &SqlitePool) -> KestrelResult<u64> {
+        let result = sqlx::query("DELETE FROM file_entries")
+            .execute(pool)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to delete all file entries: {e}")))?;
+
+        Ok(result.rows_affected())
+    }
+
     /// Lists file entries by folder.
     pub async fn list_by_folder(
         pool: &SqlitePool,
@@ -286,6 +310,7 @@ mod tests {
     #[test]
     fn create_file_entry_request_builds() {
         let req = CreateFileEntryRequest {
+            id: None,
             encrypted_filename: vec![1, 2, 3],
             encrypted_path: vec![4, 5, 6],
             encrypted_file_size: vec![7, 8, 9],

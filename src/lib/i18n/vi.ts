@@ -177,6 +177,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.loading': 'Đang tải cài đặt...',
   'settings.failedToLoad': 'Không thể tải cài đặt',
   'settings.retry': 'Thử lại',
+
+  // General
   'settings.vault': 'Kho',
   'settings.vaultName': 'Tên kho',
   'settings.myVault': 'Kho KESTREL của tôi',
@@ -195,6 +197,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.importing': 'Đang nhập...',
   'settings.clearVaultData': 'Xóa dữ liệu kho',
   'settings.clearing': 'Đang xóa...',
+
+  // Security
   'settings.encryption': 'Mã hóa',
   'settings.algorithm': 'Thuật toán',
   'settings.active': 'Hoạt động',
@@ -221,6 +225,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.masterPassword': 'Mật khẩu chính',
   'settings.lastChanged': 'Thay đổi lần cuối',
   'settings.setDuringInit': 'Được thiết lập khi tạo kho',
+
+  // Auto-lock
   'settings.autoLock': 'Tự động khóa',
   'settings.lockAfter': 'Khóa sau',
   'settings.lockAfterDesc': 'Tự động khóa kho sau thời gian không hoạt động',
@@ -238,6 +244,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.30seconds': '30 giây',
   'settings.1minute': '1 phút',
   'settings.5minutes2': '5 phút',
+
+  // Backup
   'settings.backupTitle': 'Sao lưu',
   'settings.autoBackups': 'Sao lưu tự động',
   'settings.autoBackupsDesc': 'Tạo bản sao lưu được mã hóa theo lịch trình',
@@ -251,6 +259,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.noBackupYet': 'Chưa có bản sao lưu',
   'settings.backupNow': 'Sao lưu ngay',
   'settings.creatingBackup': 'Đang tạo bản sao lưu...',
+
+  // Advanced
   'settings.advancedTitle': 'Nâng cao',
   'settings.debugMode': 'Chế độ gỡ lỗi',
   'settings.debugModeDesc': 'Bật ghi log chi tiết để khắc phục sự cố',
@@ -258,6 +268,8 @@ const vi: Record<TranslationKey, string> = {
   'settings.resetAllDesc': 'Khôi phục cài đặt mặc định (không xóa dữ liệu)',
   'settings.reset': 'Đặt lại',
   'settings.version': 'Phiên bản',
+
+  // Change Password Dialog
   'settings.changeMasterPassword': 'Đổi mật khẩu chính',
   'settings.currentPassword': 'Mật khẩu hiện tại',
   'settings.newPassword': 'Mật khẩu mới',

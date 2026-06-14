@@ -240,6 +240,7 @@ export interface FolderView {
   id: string;
   name: string;
   parent_id: string | null;
+  entry_count: number;
   created_at: string;
 }
 
@@ -272,18 +273,37 @@ export interface ScanResultView {
   entry_id: string | null;
 }
 
+export interface BreachCheckEntryResult {
+  is_breached: boolean;
+  occurrence_count: number;
+  message: string;
+  threat_level: string;
+}
+
 export const scannerCommands = {
   /** Analyze password strength. Available in any state. */
   getPasswordStrength: (password: string): Promise<PasswordStrengthResult> =>
     safeInvoke("scanner_password_strength", { password }),
 
-  /** Check breach database. Requires Unlocked state. */
+  /** Check breach database by username. Requires Unlocked state. */
   checkBreach: (username: string): Promise<ScanResultView | null> =>
     safeInvoke("scanner_check_breach", { username }),
+
+  /** Check if a password has been breached via HIBP API. Takes a raw password string (no vault decryption needed). */
+  checkPasswordBreach: (password: string): Promise<BreachCheckEntryResult> =>
+    safeInvoke("scanner_check_password_breach", { password }),
+
+  /** Check if a vault entry's password has been breached via HIBP API. Requires Unlocked state. */
+  checkEntryBreach: (entryId: string): Promise<BreachCheckEntryResult> =>
+    safeInvoke("scanner_check_entry_breach", { entryId }),
 
   /** Run comprehensive vulnerability scan. Requires Unlocked state. */
   runFullScan: (): Promise<ScanResultView[]> =>
     safeInvoke("scanner_run_full_scan"),
+
+  /** Get computed security score with breakdown. Requires Unlocked state. */
+  getSecurityScore: (): Promise<SecurityScore> =>
+    safeInvoke("scanner_get_security_score"),
 } as const;
 
 // ─── Audit Commands ────────────────────────────────────────────────
@@ -325,6 +345,14 @@ export interface AppSettings {
   theme: string;
   language: string;
   clear_clipboard_seconds: number;
+  lock_on_sleep: boolean;
+  lock_on_blur: boolean;
+  auto_backup: boolean;
+  backup_frequency: string;
+  backup_location: string;
+  debug_mode: boolean;
+  max_login_attempts: number;
+  lockout_duration_seconds: number;
 }
 
 export const settingsCommands = {
@@ -332,9 +360,26 @@ export const settingsCommands = {
   getSettings: (): Promise<AppSettings> =>
     safeInvoke("settings_get"),
 
-  /** Update settings. Requires Unlocked state. */
+  /** Update settings. Requires Unlocked state.
+   *  Tauri v2 commands expect camelCase keys, so we convert
+   *  from snake_case (AppSettings) to camelCase before sending. */
   updateSettings: (settings: Partial<AppSettings>): Promise<AppSettings> =>
-    safeInvoke("settings_update", { ...settings }),
+    safeInvoke("settings_update", {
+      autoLockMinutes: settings.auto_lock_minutes,
+      theme: settings.theme,
+      language: settings.language,
+      clearClipboardSeconds: settings.clear_clipboard_seconds,
+      lockOnSleep: settings.lock_on_sleep,
+      lockOnBlur: settings.lock_on_blur,
+      autoBackup: settings.auto_backup,
+      backupFrequency: settings.backup_frequency,
+      backupLocation: settings.backup_location,
+      debugMode: settings.debug_mode,
+    }),
+
+  /** Reset all settings to defaults. Requires Unlocked state. */
+  resetSettings: (): Promise<AppSettings> =>
+    safeInvoke("settings_reset"),
 } as const;
 
 // ─── Security Score ────────────────────────────────────────────────
@@ -355,6 +400,7 @@ export interface SecurityScore {
 export interface SecureNoteView {
   id: string;
   title: string;
+  content?: string;
   has_content: boolean;
   folder_id: string | null;
   created_at: string;
@@ -430,38 +476,44 @@ export interface FileEntryView {
   updated_at: string;
 }
 
-// ─── Backup Commands ───────────────────────────────────────────────
+export const fileCommands = {
+  /** Upload and encrypt a file. Requires Unlocked state. */
+  upload: (filePath: string, folderId?: string): Promise<FileEntryView> =>
+    safeInvoke("file_upload", { filePath, folderId: folderId ?? null }),
 
-export interface BackupInfo {
-  path: string;
-  file_size_bytes: number;
-  created_at: string;
-  schema_version: number;
-  entry_count: number;
-}
+  /** List encrypted files with decrypted metadata. Requires Unlocked state. */
+  list: (folderId?: string): Promise<FileEntryView[]> =>
+    safeInvoke("file_list", { folderId: folderId ?? null }),
 
-export const backupCommands = {
-  /** Create encrypted backup at specified path */
-  createBackup: (backupPath: string): Promise<BackupInfo> =>
-    safeInvoke("backup_create", { backupPath }),
+  /** Get file metadata by ID (no content). Requires Unlocked state. */
+  get: (id: string): Promise<FileEntryView> =>
+    safeInvoke("file_get", { id }),
 
-  /** Verify a backup file */
-  verifyBackup: (backupPath: string): Promise<boolean> =>
-    safeInvoke("backup_verify", { backupPath }),
+  /** Decrypt file and save to output path. Requires Unlocked state. */
+  decrypt: (id: string, outputPath: string): Promise<string> =>
+    safeInvoke("file_decrypt", { id, outputPath }),
 
-  /** List backup files in directory */
-  listBackups: (backupDir: string): Promise<string[]> =>
-    safeInvoke("backup_list", { backupDir }),
+  /** Delete an encrypted file (disk + DB). Requires confirmation. */
+  delete: (id: string, confirm: boolean): Promise<void> =>
+    safeInvoke("file_delete", { id, confirm }),
+} as const;
 
-  /** Delete a backup file */
-  deleteBackup: (backupPath: string): Promise<void> =>
-    safeInvoke("backup_delete", { backupPath }),
+// ─── Vault Data Management ────────────────────────────────────────
 
-  /** Export vault data as encrypted JSON */
-  exportEncrypted: (): Promise<unknown> =>
-    safeInvoke("backup_export_encrypted"),
+export const vaultDataCommands = {
+  /** Export all vault data as encrypted JSON. Requires Unlocked state. */
+  exportVault: (): Promise<string> =>
+    safeInvoke("vault_export"),
 
-  /** Restore vault from backup file */
-  restoreBackup: (backupPath: string): Promise<void> =>
-    safeInvoke("backup_restore", { backupPath }),
+  /** Import vault data from encrypted JSON. Requires Unlocked state. */
+  importVault: (data: string): Promise<void> =>
+    safeInvoke("vault_import", { data }),
+
+  /** Clear all vault data (nuclear option). Requires confirmation. */
+  clearVault: (confirm: boolean): Promise<void> =>
+    safeInvoke("vault_clear", { confirm }),
+
+  /** Create a backup of the vault database. Returns backup file path. */
+  createBackup: (): Promise<string> =>
+    safeInvoke("backup_create"),
 } as const;

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Eye, EyeOff, ArrowRight, Shield } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
+import { useI18n } from '@/hooks/use-i18n'
 
 export default function UnlockScreen() {
   const [password, setPassword] = useState('')
@@ -14,6 +15,7 @@ export default function UnlockScreen() {
   const unlockState = useAuthStore((s) => s.unlockState)
   const error = useAuthStore((s) => s.error)
   const clearError = useAuthStore((s) => s.clearError)
+  const { t } = useI18n()
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -34,64 +36,67 @@ export default function UnlockScreen() {
   return (
     <div
       className="flex items-center justify-center min-h-screen"
-      style={{ backgroundColor: '#0F172A' }}
+      style={{ backgroundColor: 'var(--kestrel-bg)' }}
     >
       <div className={`w-full max-w-sm px-6 ${isShaking ? 'animate-shake' : ''}`}>
-        <div className="flex flex-col items-center mb-10">
-          <img src="/kestrel-logo.png" alt="KESTREL" className="w-16 h-16 object-contain mb-4" />
+        <div className="flex flex-col items-center mb-10 animate-blur-in">
+          <div className="relative mb-4">
+            <div className="absolute inset-0 rounded-full animate-pulse-soft" style={{ backgroundColor: 'rgba(37, 99, 235, 0.15)', filter: 'blur(20px)', transform: 'scale(1.5)' }} />
+            <img src="/kestrel-logo.png" alt="KESTREL" className="w-16 h-16 object-contain relative" />
+          </div>
           <h1
             className="text-3xl font-bold tracking-widest"
-            style={{ color: '#F8FAFC', letterSpacing: '0.08em' }}
+            style={{ color: 'var(--kestrel-bg)', letterSpacing: '0.08em' }}
           >
             KESTREL
           </h1>
           <p
             className="text-xs font-medium tracking-widest mt-1"
-            style={{ color: '#94A3B8', letterSpacing: '0.15em' }}
+            style={{ color: 'var(--kestrel-text-on-dark-muted)', letterSpacing: '0.15em' }}
           >
             VAULT
           </p>
-          <p className="text-sm mt-2" style={{ color: '#94A3B8' }}>
-            Secure. Private. Always Yours.
+          <p className="text-sm mt-2" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>
+            {t('unlock.tagline')}
           </p>
         </div>
 
         {isUnlocking ? (
-          <div className="text-center py-8 animate-fade-in">
+          <div className="text-center py-8 animate-scale-in">
             <div
               className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-4"
-              style={{ borderColor: '#2563EB', borderTopColor: 'transparent' }}
+              style={{ borderColor: 'var(--kestrel-primary)', borderTopColor: 'transparent' }}
             />
-            <p className="text-sm" style={{ color: '#94A3B8' }}>
-              {isInitialized ? 'Unlocking...' : 'Creating vault...'}
+            <p className="text-sm" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>
+              {isInitialized ? t('unlock.unlocking') : t('unlock.creating')}
             </p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <p className="text-sm text-center mb-4" style={{ color: '#94A3B8' }}>
+          <form onSubmit={handleSubmit} className="space-y-4 animate-slide-in-from-bottom" style={{ animationFillMode: 'both' }}>
+            <p className="text-sm text-center mb-4" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>
               {isInitialized
-                ? 'Unlock your vault to continue'
-                : 'Create a master password to get started'}
+                ? t('unlock.unlockPrompt')
+                : t('unlock.createPrompt')}
             </p>
 
             <div className="relative">
               <Shield
                 size={16}
                 className="absolute left-3 top-1/2 -translate-y-1/2"
-                style={{ color: '#64748B' }}
+                style={{ color: 'var(--kestrel-text-muted)' }}
               />
               <input
                 ref={inputRef}
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); if (error) clearError() }}
-                placeholder="Master Password"
-                className="w-full h-11 rounded-lg text-sm outline-none transition-all duration-150 pr-10"
+                placeholder={t('unlock.masterPassword')}
+                className="w-full h-11 rounded-lg text-sm outline-none transition-all duration-200 pr-10"
                 style={{
-                  backgroundColor: '#FFFFFF',
+                  backgroundColor: 'var(--kestrel-surface)',
                   paddingLeft: '40px',
-                  border: error ? '1px solid #EF4444' : '1px solid #E2E8F0',
-                  color: '#0F172A',
+                  border: error ? '1px solid var(--kestrel-danger)' : '1px solid var(--kestrel-border)',
+                  color: 'var(--kestrel-text)',
                 }}
                 autoFocus
               />
@@ -99,14 +104,14 @@ export default function UnlockScreen() {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2"
-                style={{ color: '#64748B' }}
+                style={{ color: 'var(--kestrel-text-muted)' }}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
 
             {error && (
-              <p className="text-xs" style={{ color: '#EF4444' }}>
+              <p className="text-xs" style={{ color: 'var(--kestrel-danger)' }}>
                 {error}
               </p>
             )}
@@ -114,21 +119,24 @@ export default function UnlockScreen() {
             <button
               type="submit"
               disabled={!password.trim()}
-              className="w-full h-11 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-150"
+              className="w-full h-11 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200"
               style={{
-                backgroundColor: password.trim() ? '#2563EB' : '#334155',
+                backgroundColor: password.trim() ? 'var(--kestrel-primary)' : 'var(--kestrel-disabled-bg)',
                 color: '#FFFFFF',
                 cursor: password.trim() ? 'pointer' : 'not-allowed',
+                transform: 'scale(1)',
               }}
+              onMouseEnter={(e) => { if (password.trim()) { e.currentTarget.style.backgroundColor = 'var(--kestrel-primary-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.4)' } }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = password.trim() ? 'var(--kestrel-primary)' : 'var(--kestrel-disabled-bg)'; e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}
             >
-              {isInitialized ? 'Unlock Vault' : 'Create Vault'}
+              {isInitialized ? t('unlock.unlockVault') : t('unlock.createVault')}
               <ArrowRight size={16} />
             </button>
 
             {isInitialized && (
               <div className="flex items-center justify-between pt-2">
-                <span className="text-xs" style={{ color: '#64748B' }}>
-                  Auto-lock after <span className="underline cursor-pointer">5 minutes</span>
+                <span className="text-xs" style={{ color: 'var(--kestrel-text-muted)' }}>
+                  {t('unlock.autoLockInfo')} <span className="underline cursor-pointer">5 {t('unlock.minutes')}</span>
                 </span>
               </div>
             )}

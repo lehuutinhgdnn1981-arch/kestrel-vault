@@ -149,6 +149,7 @@ impl<'a> VaultServiceImpl<'a> {
 
         // Build the repository request
         let repo_request = CreateVaultEntryRequest {
+            id: Some(entry_id),
             title: request.title.clone(),
             username: request.username.clone(),
             encrypted_password,
@@ -357,6 +358,7 @@ impl<'a> VaultServiceImpl<'a> {
         let nonce_vec = nonce.to_vec();
 
         let repo_request = CreateFolderRequest {
+            id: Some(folder_id),
             encrypted_name,
             nonce: nonce_vec,
             parent_id: parent_id.map(|u| u.to_string()),
@@ -489,6 +491,7 @@ impl<'a> VaultServiceImpl<'a> {
         };
 
         let repo_request = CreateSecureNoteRequest {
+            id: Some(note_id),
             encrypted_title,
             encrypted_content,
             nonce: nonce_vec,

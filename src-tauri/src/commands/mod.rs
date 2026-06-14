@@ -22,14 +22,15 @@
 
 pub mod audit_commands;
 pub mod auth_commands;
-pub mod backup_commands;
 pub mod crypto_commands;
+pub mod file_commands;
 pub mod folder_commands;
 pub mod note_commands;
 pub mod scanner_commands;
 pub mod settings_commands;
 pub mod types;
 pub mod vault_commands;
+pub mod vault_data_commands;
 
 /// Provides a simple async runtime for blocking on async operations
 /// from synchronous Tauri command handlers.

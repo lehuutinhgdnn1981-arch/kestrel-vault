@@ -109,6 +109,7 @@ pub fn folder_create(
     };
 
     let request = crate::db::folder_repo::CreateFolderRequest {
+        id: Some(folder_id.clone()),
         encrypted_name: encrypted.envelope_bytes,
         nonce: nonce_bytes,
         parent_id,

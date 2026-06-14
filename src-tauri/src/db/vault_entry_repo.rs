@@ -68,6 +68,9 @@ pub struct VaultEntryRow {
 /// passed directly for search indexing.
 #[derive(Debug, Clone)]
 pub struct CreateVaultEntryRequest {
+    /// Pre-generated entry ID (UUID v4).
+    /// Must be generated BEFORE encryption as it is the AAD context.
+    pub id: Option<String>,
     /// Plaintext title (for search).
     pub title: String,
     /// Plaintext username (for search).
@@ -122,7 +125,7 @@ impl VaultEntryRepo {
         pool: &SqlitePool,
         request: CreateVaultEntryRequest,
     ) -> KestrelResult<VaultEntryRow> {
-        let id = Uuid::new_v4().to_string();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now().to_rfc3339();
 
         sqlx::query(
@@ -258,6 +261,18 @@ impl VaultEntryRepo {
             return Err(KestrelError::Vault(format!("Entry not found: {id}")));
         }
         Ok(())
+    }
+
+    /// Deletes ALL vault entries.
+    ///
+    /// Use with extreme caution — this is irreversible.
+    pub async fn delete_all(pool: &SqlitePool) -> KestrelResult<u64> {
+        let result = sqlx::query("DELETE FROM vault_entries")
+            .execute(pool)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to delete all entries: {e}")))?;
+
+        Ok(result.rows_affected())
     }
 
     /// Lists vault entries with pagination.
@@ -421,6 +436,7 @@ mod tests {
     #[test]
     fn create_entry_request_builds() {
         let req = CreateVaultEntryRequest {
+            id: None,
             title: "GitHub".to_string(),
             username: "user@example.com".to_string(),
             encrypted_password: vec![1, 2, 3],

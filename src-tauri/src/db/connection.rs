@@ -149,6 +149,56 @@ impl DbConnection {
         Ok(DbConnection { pool })
     }
 
+    /// Creates a new plain (non-SQLCipher) database connection pool.
+    ///
+    /// This opens a standard SQLite database without PRAGMA key encryption.
+    /// Since all sensitive vault data is already encrypted at the field level
+    /// with AES-256-GCM using the DEK, the database file itself doesn't need
+    /// additional SQLCipher encryption. This avoids the dependency on the
+    /// SQLCipher native library.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the SQLite database file
+    /// * `config` - Database configuration parameters
+    ///
+    /// # Security
+    ///
+    /// All sensitive data (passwords, URLs, notes, etc.) is encrypted
+    /// at the application level before storage. The database file contains
+    /// only encrypted blobs and non-sensitive metadata.
+    pub async fn new_plain(
+        path: &Path,
+        config: &DatabaseConfig,
+    ) -> Result<Self, KestrelError> {
+        let connection_str = format!("sqlite:{}?mode=rwc", path.display());
+
+        let mut options = SqliteConnectOptions::from_str(&connection_str)
+            .map_err(|e| KestrelError::Database(format!("Invalid connection options: {e}")))?;
+
+        // ── Journaling & Durability ──
+        options = options.pragma("journal_mode", "WAL");
+        options = options.pragma("synchronous", config.synchronous_mode.to_string());
+
+        // ── Foreign Keys ──
+        if config.foreign_keys {
+            options = options.pragma("foreign_keys", "ON");
+        }
+
+        // ── Performance PRAGMAs ──
+        options = options.pragma("cache_size", config.cache_size_kib.to_string());
+        options = options.pragma("busy_timeout", config.busy_timeout_ms.to_string());
+        options = options.pragma("temp_store", "MEMORY");
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(config.max_connections)
+            .connect_with(options)
+            .await
+            .map_err(|e| KestrelError::Database(format!("Failed to create connection pool: {e}")))?;
+
+        Ok(DbConnection { pool })
+    }
+
     /// Creates an in-memory SQLite database for testing.
     ///
     /// This bypasses SQLCipher encryption and creates a plain

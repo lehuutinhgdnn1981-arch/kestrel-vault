@@ -10,7 +10,6 @@ import {
   Search,
   CheckCircle,
   Shield,
-  Bell,
   Trash2,
   Lock,
   Settings,
@@ -21,7 +20,8 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useVaultStore } from '@/stores/vault-store'
 import { useNoteStore } from '@/stores/note-store'
 import { useNavigate } from 'react-router-dom'
-import { auditCommands, scannerCommands, type AuditEventView } from '@/lib/tauri'
+import { auditCommands, fileCommands, scannerCommands, type AuditEventView } from '@/lib/tauri'
+import { useI18n } from '@/hooks/use-i18n'
 
 const sparkData1 = [
   { v: 65 }, { v: 72 }, { v: 68 }, { v: 75 }, { v: 80 }, { v: 77 }, { v: 85 }, { v: 87 },
@@ -36,24 +36,24 @@ const sparkData3 = [
 // Map audit event categories/actions to icons and colors
 function getAuditEventStyle(category: string, action: string): { icon: typeof Plus; color: string } {
   if (category === 'vault') {
-    if (action === 'create') return { icon: Plus, color: '#2563EB' }
-    if (action === 'delete') return { icon: Trash2, color: '#EF4444' }
-    if (action === 'password_reveal') return { icon: Eye, color: '#F59E0B' }
-    return { icon: Key, color: '#2563EB' }
+    if (action === 'create') return { icon: Plus, color: 'var(--kestrel-primary)' }
+    if (action === 'delete') return { icon: Trash2, color: 'var(--kestrel-danger)' }
+    if (action === 'password_reveal') return { icon: Eye, color: 'var(--kestrel-warning)' }
+    return { icon: Key, color: 'var(--kestrel-primary)' }
   }
-  if (category === 'notes') return { icon: FilePlus, color: '#8B5CF6' }
-  if (category === 'files') return { icon: Upload, color: '#22C55E' }
-  if (category === 'scanner') return { icon: ShieldCheck, color: '#22C55E' }
+  if (category === 'notes') return { icon: FilePlus, color: 'var(--kestrel-accent-purple)' }
+  if (category === 'files') return { icon: Upload, color: 'var(--kestrel-success)' }
+  if (category === 'scanner') return { icon: ShieldCheck, color: 'var(--kestrel-success)' }
   if (category === 'auth') {
-    if (action === 'unlock') return { icon: Lock, color: '#22C55E' }
-    if (action === 'lock') return { icon: Lock, color: '#64748B' }
-    return { icon: Shield, color: '#2563EB' }
+    if (action === 'unlock') return { icon: Lock, color: 'var(--kestrel-success)' }
+    if (action === 'lock') return { icon: Lock, color: 'var(--kestrel-text-muted)' }
+    return { icon: Shield, color: 'var(--kestrel-primary)' }
   }
-  if (category === 'settings') return { icon: Settings, color: '#64748B' }
-  return { icon: Shield, color: '#64748B' }
+  if (category === 'settings') return { icon: Settings, color: 'var(--kestrel-text-muted)' }
+  return { icon: Shield, color: 'var(--kestrel-text-muted)' }
 }
 
-function formatTimeAgo(timestamp: string): string {
+function formatTimeAgo(timestamp: string, t: (key: any) => string): string {
   const now = Date.now()
   const then = new Date(timestamp).getTime()
   const diffMs = now - then
@@ -62,10 +62,10 @@ function formatTimeAgo(timestamp: string): string {
   const diffHours = Math.floor(diffMinutes / 60)
   const diffDays = Math.floor(diffHours / 24)
 
-  if (diffSeconds < 60) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes} min ago`
-  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`
-  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`
+  if (diffSeconds < 60) return t('time.justNow')
+  if (diffMinutes < 60) return `${diffMinutes} ${t('time.minAgo')}`
+  if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? t('time.hourAgo') : t('time.hoursAgo')}`
+  return `${diffDays} ${diffDays === 1 ? t('time.dayAgo') : t('time.daysAgo')}`
 }
 
 interface ActivityItem {
@@ -98,14 +98,14 @@ function SecurityScoreGauge({ score }: { score: number }) {
   const circumference = 2 * Math.PI * r
   const offset = circumference - (score / 100) * circumference
 
-  const color = score >= 90 ? '#22C55E' : score >= 70 ? '#2563EB' : score >= 40 ? '#F59E0B' : '#EF4444'
+  const color = score >= 90 ? 'var(--kestrel-success)' : score >= 70 ? 'var(--kestrel-primary)' : score >= 40 ? 'var(--kestrel-warning)' : 'var(--kestrel-danger)'
 
   return (
     <svg width="140" height="140" viewBox="0 0 140 140">
       <circle
         cx="70" cy="70" r={r}
         fill="none"
-        stroke="#E2E8F0"
+        stroke="var(--kestrel-border)"
         strokeWidth="8"
       />
       <circle
@@ -119,10 +119,10 @@ function SecurityScoreGauge({ score }: { score: number }) {
         transform="rotate(-90 70 70)"
         style={{ transition: 'stroke-dashoffset 800ms ease-out' }}
       />
-      <text x="70" y="65" textAnchor="middle" fill="#0F172A" fontSize="28" fontWeight="600">
+      <text x="70" y="65" textAnchor="middle" fill="var(--kestrel-text)" fontSize="28" fontWeight="600">
         {score}
       </text>
-      <text x="70" y="82" textAnchor="middle" fill="#64748B" fontSize="11">
+      <text x="70" y="82" textAnchor="middle" fill="var(--kestrel-text-muted)" fontSize="11">
         /100
       </text>
     </svg>
@@ -141,6 +141,7 @@ function MiniSparkline({ data, color }: { data: Array<{ v: number }>; color: str
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const entries = useVaultStore((s) => s.entries)
   const fetchEntries = useVaultStore((s) => s.fetchEntries)
   const notes = useNoteStore((s) => s.notes)
@@ -152,8 +153,8 @@ export default function Dashboard() {
 
   const passwordCount = entries.length
   const noteCount = notes.length
-  const fileCount = 0 // No file vault backend integration yet
-  const storageUsed = 2.46
+  const [fileCount, setFileCount] = useState(0)
+  const [storageUsed, setStorageUsed] = useState(0)
   const storageTotal = 10
 
   useEffect(() => {
@@ -164,23 +165,26 @@ export default function Dashboard() {
       // Fetch security score
       const fetchScore = async () => {
         try {
-          const results = await scannerCommands.runFullScan()
-          if (results.length === 0) {
-            setSecurityScore(100)
-          } else {
-            const criticalCount = results.filter((r) => r.threat_level === 'critical').length
-            const highCount = results.filter((r) => r.threat_level === 'high').length
-            const mediumCount = results.filter((r) => r.threat_level === 'medium').length
-            const lowCount = results.filter((r) => r.threat_level === 'low' || r.threat_level === 'none').length
-            const deduction = criticalCount * 25 + highCount * 15 + mediumCount * 8 + lowCount * 3
-            const score = Math.max(0, Math.min(100, 100 - deduction))
-            setSecurityScore(score)
-          }
+          const result = await scannerCommands.getSecurityScore()
+          setSecurityScore(result.score)
         } catch {
           // Silently fail — score will remain 0
         }
       }
       fetchScore()
+
+      // Fetch file count from backend
+      const fetchFileCount = async () => {
+        try {
+          const files = await fileCommands.list()
+          setFileCount(files.length)
+          const totalBytes = files.reduce((sum, f) => sum + f.size_bytes, 0)
+          setStorageUsed(totalBytes / (1024 * 1024 * 1024)) // Convert to GB
+        } catch {
+          // Silently fail — file count will remain 0
+        }
+      }
+      fetchFileCount()
 
       // Fetch recent activity from audit log
       const fetchActivity = async () => {
@@ -192,7 +196,7 @@ export default function Dashboard() {
               icon: style.icon,
               color: style.color,
               text: `${event.action} ${event.category}: ${event.subject}`,
-              time: formatTimeAgo(event.timestamp),
+              time: formatTimeAgo(event.timestamp, t),
             }
           })
           setRecentActivity(activityItems)
@@ -206,117 +210,87 @@ export default function Dashboard() {
 
   return (
     <div className="animate-fade-in">
-      <div
-        className="flex items-center justify-between px-8"
-        style={{ height: '56px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}
-      >
-        <div>
-          <h2 className="text-lg font-semibold" style={{ color: '#0F172A' }}>Dashboard</h2>
-        </div>
-        <div className="flex items-center gap-4">
-          <div
-            className="flex items-center gap-2 px-3 h-9 rounded-lg"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', width: '280px' }}
-          >
-            <Search size={16} style={{ color: '#64748B' }} />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="bg-transparent outline-none text-sm flex-1"
-              style={{ color: '#0F172A' }}
-            />
-          </div>
-          <button
-            className="relative w-9 h-9 flex items-center justify-center rounded-lg transition-colors duration-150"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0' }}
-          >
-            <Bell size={16} style={{ color: '#64748B' }} />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ backgroundColor: '#EF4444' }} />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-8 space-y-6">
+      <div className="p-6 space-y-6">
         <div className="grid grid-cols-4 gap-4">
           <div
             className="rounded-xl p-5 transition-shadow duration-150 hover:shadow-md"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(37, 99, 235, 0.1)' }}>
-                <ShieldCheck size={16} style={{ color: '#2563EB' }} />
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-primary-subtle)' }}>
+                <ShieldCheck size={16} style={{ color: 'var(--kestrel-primary)' }} />
               </div>
-              <MiniSparkline data={sparkData1} color="#2563EB" />
+              <MiniSparkline data={sparkData1} color="var(--kestrel-primary)" />
             </div>
-            <div className="text-2xl font-semibold" style={{ color: '#0F172A' }}>
+            <div className="text-2xl font-semibold" style={{ color: 'var(--kestrel-text)' }}>
               <AnimatedNumber value={securityScore} />
             </div>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>Security Score</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.securityScore')}</p>
           </div>
 
           <div
             className="rounded-xl p-5 transition-shadow duration-150 hover:shadow-md"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)' }}>
-                <Key size={16} style={{ color: '#22C55E' }} />
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-success-subtle)' }}>
+                <Key size={16} style={{ color: 'var(--kestrel-success)' }} />
               </div>
-              <MiniSparkline data={sparkData2} color="#22C55E" />
+              <MiniSparkline data={sparkData2} color="var(--kestrel-success)" />
             </div>
-            <div className="text-2xl font-semibold" style={{ color: '#0F172A' }}>
+            <div className="text-2xl font-semibold" style={{ color: 'var(--kestrel-text)' }}>
               <AnimatedNumber value={passwordCount} />
             </div>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>Passwords</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.passwords')}</p>
           </div>
 
           <div
             className="rounded-xl p-5 transition-shadow duration-150 hover:shadow-md"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)' }}>
-                <FileText size={16} style={{ color: '#F59E0B' }} />
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-warning-subtle)' }}>
+                <FileText size={16} style={{ color: 'var(--kestrel-warning)' }} />
               </div>
-              <MiniSparkline data={sparkData3} color="#F59E0B" />
+              <MiniSparkline data={sparkData3} color="var(--kestrel-warning)" />
             </div>
-            <div className="text-2xl font-semibold" style={{ color: '#0F172A' }}>
+            <div className="text-2xl font-semibold" style={{ color: 'var(--kestrel-text)' }}>
               <AnimatedNumber value={fileCount} />
             </div>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>Files</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.files')}</p>
           </div>
 
           <div
             className="rounded-xl p-5 transition-shadow duration-150 hover:shadow-md"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center justify-between mb-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)' }}>
-                <StickyNote size={16} style={{ color: '#8B5CF6' }} />
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-purple-subtle)' }}>
+                <StickyNote size={16} style={{ color: 'var(--kestrel-accent-purple)' }} />
               </div>
             </div>
-            <div className="text-2xl font-semibold" style={{ color: '#0F172A' }}>
+            <div className="text-2xl font-semibold" style={{ color: 'var(--kestrel-text)' }}>
               <AnimatedNumber value={noteCount} />
             </div>
-            <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>Notes</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.notes')}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-5 gap-4">
           <div
             className="col-span-3 rounded-xl p-6"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
-            <h3 className="text-base font-semibold mb-4" style={{ color: '#0F172A' }}>Security Score</h3>
+            <h3 className="text-base font-semibold mb-4" style={{ color: 'var(--kestrel-text)' }}>{t('dashboard.securityScore')}</h3>
             <div className="flex flex-col items-center">
               <SecurityScoreGauge score={securityScore} />
-              <p className="text-sm font-medium mt-2" style={{ color: securityScore >= 70 ? '#22C55E' : securityScore >= 40 ? '#F59E0B' : '#EF4444' }}>
-                {securityScore >= 90 ? 'Excellent' : securityScore >= 70 ? 'Strong' : securityScore >= 40 ? 'Fair' : 'Needs Attention'}
+              <p className="text-sm font-medium mt-2" style={{ color: securityScore >= 70 ? 'var(--kestrel-success)' : securityScore >= 40 ? 'var(--kestrel-warning)' : 'var(--kestrel-danger)' }}>
+                {securityScore >= 90 ? t('dashboard.excellent') : securityScore >= 70 ? t('dashboard.strong') : securityScore >= 40 ? t('dashboard.fair') : t('dashboard.needsAttention')}
               </p>
               <div className="flex items-center gap-1.5 mt-1">
-                <CheckCircle size={14} style={{ color: securityScore >= 70 ? '#22C55E' : '#F59E0B' }} />
-                <span className="text-xs" style={{ color: '#64748B' }}>
-                  {securityScore >= 70 ? 'Your vault is secure' : 'Review security issues'}
+                <CheckCircle size={14} style={{ color: securityScore >= 70 ? 'var(--kestrel-success)' : 'var(--kestrel-warning)' }} />
+                <span className="text-xs" style={{ color: 'var(--kestrel-text-muted)' }}>
+                  {securityScore >= 70 ? t('dashboard.vaultSecure') : t('dashboard.reviewIssues')}
                 </span>
               </div>
             </div>
@@ -324,16 +298,16 @@ export default function Dashboard() {
 
           <div
             className="col-span-2 rounded-xl p-6"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold" style={{ color: '#0F172A' }}>Recent Activity</h3>
-              <button onClick={() => navigate('/audit')} className="text-xs font-medium" style={{ color: '#2563EB' }}>View all</button>
+              <h3 className="text-base font-semibold" style={{ color: 'var(--kestrel-text)' }}>{t('dashboard.recentActivity')}</h3>
+              <button onClick={() => navigate('/audit')} className="text-xs font-medium" style={{ color: 'var(--kestrel-primary)' }}>{t('dashboard.viewAll')}</button>
             </div>
             <div className="space-y-1">
               {recentActivity.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-sm" style={{ color: '#94A3B8' }}>No recent activity</p>
+                  <p className="text-sm" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>{t('dashboard.noRecentActivity')}</p>
                 </div>
               ) : (
                 recentActivity.map((item, i) => {
@@ -342,7 +316,7 @@ export default function Dashboard() {
                     <div
                       key={i}
                       className="flex items-center gap-3 px-2 py-2 rounded-lg transition-colors duration-150 cursor-pointer"
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-hover-bg)' }}
                       onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
                     >
                       <div
@@ -351,8 +325,8 @@ export default function Dashboard() {
                       >
                         <Icon size={13} style={{ color: item.color }} />
                       </div>
-                      <span className="text-sm flex-1 truncate" style={{ color: '#0F172A' }}>{item.text}</span>
-                      <span className="text-xs flex-shrink-0" style={{ color: '#94A3B8' }}>{item.time}</span>
+                      <span className="text-sm flex-1 truncate" style={{ color: 'var(--kestrel-text)' }}>{item.text}</span>
+                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>{item.time}</span>
                     </div>
                   )
                 })
@@ -364,51 +338,51 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 gap-4">
           <div
             className="rounded-xl p-6"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)' }}>
-                <Shield size={20} style={{ color: '#22C55E' }} />
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-success-subtle)' }}>
+                <Shield size={20} style={{ color: 'var(--kestrel-success)' }} />
               </div>
               <div>
-                <h3 className="text-base font-semibold" style={{ color: '#0F172A' }}>No threats found</h3>
-                <p className="text-sm" style={{ color: '#64748B' }}>Your vault is safe</p>
+                <h3 className="text-base font-semibold" style={{ color: 'var(--kestrel-text)' }}>{t('dashboard.noThreats')}</h3>
+                <p className="text-sm" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.vaultSafe')}</p>
               </div>
             </div>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>Run a scan to check for threats</p>
+            <p className="text-xs" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>{t('dashboard.runScan')}</p>
           </div>
 
           <div
             className="rounded-xl p-6"
-            style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+            style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
           >
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)' }}>
-                <CheckCircle size={20} style={{ color: '#22C55E' }} />
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--kestrel-success-subtle)' }}>
+                <CheckCircle size={20} style={{ color: 'var(--kestrel-success)' }} />
               </div>
               <div>
-                <h3 className="text-base font-semibold" style={{ color: '#0F172A' }}>All systems operational</h3>
-                <p className="text-sm" style={{ color: '#64748B' }}>Everything is running smoothly</p>
+                <h3 className="text-base font-semibold" style={{ color: 'var(--kestrel-text)' }}>{t('dashboard.allSystemsOperational')}</h3>
+                <p className="text-sm" style={{ color: 'var(--kestrel-text-muted)' }}>{t('dashboard.runningSmoothly')}</p>
               </div>
             </div>
-            <p className="text-xs" style={{ color: '#94A3B8' }}>Last checked: just now</p>
+            <p className="text-xs" style={{ color: 'var(--kestrel-text-on-dark-muted)' }}>{t('dashboard.lastChecked')}</p>
           </div>
         </div>
 
         <div
           className="rounded-xl p-6"
-          style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)' }}
+          style={{ backgroundColor: 'var(--kestrel-surface)', border: '1px solid var(--kestrel-border)', boxShadow: 'var(--kestrel-shadow-card)' }}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium" style={{ color: '#0F172A' }}>Storage Usage</span>
-            <span className="text-xs" style={{ color: '#64748B' }}>{storageUsed.toFixed(2)} GB / {storageTotal} GB used</span>
+            <span className="text-sm font-medium" style={{ color: 'var(--kestrel-text)' }}>{t('dashboard.storageUsage')}</span>
+            <span className="text-xs" style={{ color: 'var(--kestrel-text-muted)' }}>{storageUsed.toFixed(2)} GB / {storageTotal} GB {t('dashboard.used')}</span>
           </div>
-          <div className="w-full h-2 rounded-full mb-6" style={{ backgroundColor: '#F1F5F9' }}>
+          <div className="w-full h-2 rounded-full mb-6" style={{ backgroundColor: 'var(--kestrel-border-subtle)' }}>
             <div
               className="h-2 rounded-full"
               style={{
                 width: `${(storageUsed / storageTotal) * 100}%`,
-                backgroundColor: '#2563EB',
+                backgroundColor: 'var(--kestrel-primary)',
                 transition: 'width 300ms ease',
               }}
             />
@@ -418,38 +392,38 @@ export default function Dashboard() {
             <button
               onClick={() => navigate('/vault')}
               className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium transition-colors duration-150"
-              style={{ backgroundColor: '#2563EB', color: '#FFFFFF' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#1D4ED8' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#2563EB' }}
+              style={{ backgroundColor: 'var(--kestrel-primary)', color: '#FFFFFF' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-primary-hover)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-primary)' }}
             >
-              <Plus size={16} /> Add Password
+              <Plus size={16} /> {t('dashboard.addPassword')}
             </button>
             <button
               onClick={() => navigate('/files')}
               className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium transition-colors duration-150"
-              style={{ backgroundColor: '#FFFFFF', color: '#0F172A', border: '1px solid #E2E8F0' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#FFFFFF' }}
+              style={{ backgroundColor: 'var(--kestrel-surface)', color: 'var(--kestrel-text)', border: '1px solid var(--kestrel-border)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-hover-bg)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-surface)' }}
             >
-              <Upload size={16} /> Upload File
+              <Upload size={16} /> {t('dashboard.uploadFile')}
             </button>
             <button
               onClick={() => navigate('/notes')}
               className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium transition-colors duration-150"
-              style={{ backgroundColor: '#FFFFFF', color: '#0F172A', border: '1px solid #E2E8F0' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#FFFFFF' }}
+              style={{ backgroundColor: 'var(--kestrel-surface)', color: 'var(--kestrel-text)', border: '1px solid var(--kestrel-border)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-hover-bg)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-surface)' }}
             >
-              <FilePlus size={16} /> New Note
+              <FilePlus size={16} /> {t('dashboard.newNote')}
             </button>
             <button
               onClick={() => navigate('/scanner')}
               className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium transition-colors duration-150"
-              style={{ backgroundColor: '#FFFFFF', color: '#0F172A', border: '1px solid #E2E8F0' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F8FAFC' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#FFFFFF' }}
+              style={{ backgroundColor: 'var(--kestrel-surface)', color: 'var(--kestrel-text)', border: '1px solid var(--kestrel-border)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-hover-bg)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--kestrel-surface)' }}
             >
-              <Search size={16} /> Run Scan
+              <Search size={16} /> {t('dashboard.runScanBtn')}
             </button>
           </div>
         </div>
