@@ -1,2 +1,40 @@
-skills/
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Tauri build artifacts
+src-tauri/Cargo.lock
+src-tauri/gen/
+
+# AI agent workspace files
+download/
+tool-results/
+upload/
+work/
+worklog.md
+kestrel-vault-fix/
+kestrel-vault-icons/
+skills/
