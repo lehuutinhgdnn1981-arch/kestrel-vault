@@ -486,7 +486,7 @@ export default function Settings() {
                         if (filePath) {
                           const confirmed = await message(
                             'Restoring from backup will replace all current vault data. You will need to re-enter your master password. Continue?',
-                            { title: 'Confirm Restore', kind: 'warning', okLabel: 'Restore', cancelLabel: 'Cancel' }
+                            { title: 'Confirm Restore', kind: 'warning', okLabel: 'Restore' }
                           )
                           if (confirmed) {
                             await backupCommands.restoreBackup(filePath as string)

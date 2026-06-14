@@ -199,8 +199,8 @@ export default function FileVault() {
                 <span className="text-xs" style={{ color: '#64748B' }}>{file.size}</span>
                 <span className="text-xs" style={{ color: '#94A3B8' }}>{file.modified}</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: risk.color }} />
-                  <span className="text-xs" style={{ color: risk.color }}>{risk.label}</span>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: risk!.color }} />
+                  <span className="text-xs" style={{ color: risk!.color }}>{risk!.label}</span>
                 </div>
               </button>
             )

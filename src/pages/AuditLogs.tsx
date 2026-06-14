@@ -211,13 +211,13 @@ export default function AuditLogs() {
 
                 {logs.map((log) => {
                   const severity = getEventSeverity(log.type)
-                  const config = severityConfig[severity] ?? severityConfig.info
+                  const config = severityConfig[severity] ?? severityConfig.info!
                   const EventIcon = eventIcons[log.type] || Settings
                   return (
                     <div key={log.id} className="relative mb-4">
                       <div
                         className="absolute -left-6 top-3 w-3 h-3 rounded-full border-2"
-                        style={{ backgroundColor: config.dot, borderColor: '#F8FAFC' }}
+                        style={{ backgroundColor: config!.dot, borderColor: '#F8FAFC' }}
                       />
 
                       <div
@@ -226,9 +226,9 @@ export default function AuditLogs() {
                       >
                         <div
                           className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-                          style={{ backgroundColor: `${config.dot}15` }}
+                          style={{ backgroundColor: `${config!.dot}15` }}
                         >
-                          <EventIcon size={15} style={{ color: config.dot }} />
+                          <EventIcon size={15} style={{ color: config!.dot }} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm" style={{ color: '#0F172A' }}>{log.description}</p>

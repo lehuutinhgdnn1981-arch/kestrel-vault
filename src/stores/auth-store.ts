@@ -221,7 +221,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
     try {
       const vaultStatus = await authCommands.getVaultStatus();
       set({
-        vaultState: vaultStatus.state,
+        vaultState: vaultStatus.state as VaultLifecycleState,
         isInitialized: vaultStatus.is_initialized,
         failedUnlockAttempts: vaultStatus.failed_unlock_attempts,
         isLockedOut: vaultStatus.is_locked_out,
